@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AlignRead test article</title>
+    <style>
+      body { margin: 0; color: #202124; font: 17px/1.6 system-ui, sans-serif; }
+      nav { position: sticky; top: 0; padding: 12px 24px; background: #e4eef7; }
+      main { max-width: 68ch; margin: 24px auto 70vh; padding: 0 24px; }
+      pre { overflow: auto; padding: 12px; background: #f2f4f6; }
+      th, td { padding-inline: 10px; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <nav aria-label="Contents"><a href="#example">Go to examples</a></nav>
+    <main>
+      <article>
+        <h1>Reading an API reference</h1>
+        <p>Read the topic in order to preserve its context.</p>
+        <p>A reference can be read from beginning to end or used to look up a specific method.</p>
+        <p>Read the <strong>release notes</strong> before installing <code>example_cli</code> v2.4.0.</p>
+        <p hidden>Hidden fixture text should remain on the original page.</p>
+        <div contenteditable="true">Editable fixture text should remain on the original page.</div>
+        <details>
+          <summary>Show a reading tip</summary>
+          <p>Compare the example with the method's documented behavior.</p>
+        </details>
+        <label>Local-only note <input type="text" value="fixture value" /></label>
+        <h2 id="example">Examples</h2>
+        <p>Read the topic in order to preserve its context.</p>
+        <ul><li>Check preconditions.</li><li>Check return values.</li></ul>
+        <blockquote>Start with the smallest useful example.</blockquote>
+        <pre><code>const result = Math.max(2, 5);</code></pre>
+        <table>
+          <caption>Example values</caption>
+          <thead><tr><th scope="col">Input</th><th scope="col">Result</th></tr></thead>
+          <tbody><tr><td>2 and 5</td><td>5</td></tr></tbody>
+        </table>
+      </article>
+    </main>
+  </body>
+</html>

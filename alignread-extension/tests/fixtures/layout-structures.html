@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Reading layout structures</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 sans-serif; }
+    main { padding: 24px; }
+    .callout { background: #253a49; color: white; padding: 16px; border-radius: 8px; }
+    .callout a { color: white; }
+    .emphasis { font-weight: bold; font-style: italic; }
+    .address { white-space: pre-line; }
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; list-style: square; }
+    table { caption-side: bottom; }
+    td { text-align: right; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Reading layout structures</h1>
+    <div class="callout">
+      <h2>Important notice</h2>
+      <p>Read the <a href="https://example.com/reference">reference</a>.</p>
+    </div>
+    <p><mark>Highlighted</mark>, <del>outdated</del>, <ins>new</ins>, <span class="emphasis">emphasized</span>,
+      H<sub>2</sub>O and x<sup>2</sup>. Press <kbd>Ctrl+K</kbd>.<br>Continue on another line.</p>
+    <p class="address">First address line
+Second address line</p>
+    <hr>
+    <ul class="features"><li>Feature Alpha</li><li>Feature Beta</li><li>Feature Gamma</li></ul>
+    <ol reversed start="7" type="I"><li>First entry</li><li value="4">Overridden entry</li></ol>
+    <dl><dt>Timeout</dt><dd>Time allowed to run an operation.</dd></dl>
+    <details open><summary>Open note</summary><p>Visible disclosure text.</p></details>
+    <details><summary>Closed note</summary><p>Hidden disclosure text.</p></details>
+    <figure>
+      <p><img width="176" height="96" alt="Image description only"
+        src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></p>
+      <figcaption>Figure caption</figcaption>
+    </figure>
+    <table>
+      <caption>Comparison caption</caption>
+      <thead><tr><th scope="col">Name</th><th scope="colgroup" colspan="2">Group one</th>
+        <th scope="col">Delta</th><th scope="col">Epsilon</th><th scope="col">Zeta</th><th scope="col">Eta</th></tr></thead>
+      <tbody><tr><th scope="row" rowspan="2">Sample</th><td>Alpha</td><td>Beta</td><td>Gamma</td>
+        <td>Delta</td><td>Epsilon</td><td>Zeta</td></tr><tr><td colspan="6">Example note</td></tr></tbody>
+    </table>
+  </main>
+</body>
+</html>

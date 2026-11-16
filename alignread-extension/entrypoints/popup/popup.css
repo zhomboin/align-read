@@ -1,0 +1,15 @@
+:root { color-scheme: light; }
+body { margin: 0; min-width: 314px; color: #21332b; background: #faf9f6; font: 13px system-ui, sans-serif; }
+main { padding: 15px; }
+header, .actions { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+h1 { margin: 0; font-size: 19px; }
+button, select { font: inherit; color: inherit; border-radius: 5px; padding: 6px 8px; border: 1px solid #bfc9c0; background: #fff; }
+button { cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+button.primary { color: #fff; border-color: #285946; background: #285946; }
+.language-fields { border: 0; padding: 0; margin: 13px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.language-fields label { display: grid; gap: 4px; }
+.language-fields .full { grid-column: 1 / -1; }
+.sensitive { display: flex; align-items: start; gap: 3px; margin-block: 8px; color: #754620; }
+.notice { max-width: 284px; margin: 8px 0; line-height: 1.5; }
+.actions { justify-content: start; margin-top: 12px; }

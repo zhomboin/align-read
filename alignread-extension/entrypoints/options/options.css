@@ -1,0 +1,23 @@
+:root { color-scheme: light; }
+body { margin: 0; background: #faf9f6; color: #22342b; font: 14px/1.5 system-ui, sans-serif; }
+main { width: min(620px, 100%); margin: 0 auto; padding: 20px; box-sizing: border-box; }
+h1 { font-size: 23px; margin: 0; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+section { background: #fff; border: 1px solid #dbe1d7; padding: 13px 15px; margin-block: 10px; border-radius: 7px; }
+p { margin: 6px 0; }
+.field, .language-fields label { display: grid; gap: 4px; margin-block: 8px; }
+.check { display: flex; gap: 5px; align-items: baseline; margin-block: 7px; }
+.hint { color: #4c5f54; font-size: 12px; }
+.connection-status { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; padding: 8px 10px; background: #f2f5f0; border-radius: 5px; }
+.connection-status dt { color: #4c5f54; }
+.connection-status dd { margin: 0; overflow-wrap: anywhere; }
+.connection-status time { margin-inline-start: 8px; }
+.language-fields { border: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; column-gap: 9px; }
+.language-fields .full { grid-column: 1 / -1; }
+input, textarea, select, button { font: inherit; color: inherit; }
+input[type="text"], input[type="password"], textarea, select, button { border: 1px solid #bdcabe; border-radius: 5px; padding: 5px 8px; background: #fff; }
+button { cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+button.primary { background: #285946; border-color: #285946; color: #fff; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
