@@ -1,0 +1,36 @@
+name: AlignRead regression
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: alignread-extension
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: alignread-extension/.nvmrc
+          cache: npm
+          cache-dependency-path: alignread-extension/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Run full Chromium and Worker regression
+        run: CHROMIUM_BIN="$(command -v google-chrome)" npm run test:release
+      - name: Verify distribution ZIP
+        run: |
+          npm run zip
+          unzip -t .output/alignread-extension-*-chrome.zip

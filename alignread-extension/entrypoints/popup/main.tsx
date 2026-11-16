@@ -58,10 +58,24 @@ function Popup() {
     setPending(false);
   }
 
+  async function toggleSelection() {
+    if (tabId === undefined || provider === undefined || !page || pending) return;
+    const enable = !page.selectionEnabled;
+    setPending(true);
+    setError(undefined);
+    const result = await request<null>(enable
+      ? { type: 'selection-start', tabId, provider, options: choice, confirmSensitive }
+      : { type: 'selection-stop', tabId });
+    if (result.ok) setPage((current) => current && ({ ...current, selectionEnabled: enable }));
+    else setError(result.error);
+    setPending(false);
+  }
+
   const reader = page?.reader;
   const active = Boolean(reader && (reader.status !== 'error' || reader.total > 0));
   const access = page && selectedProviderAccess(page.settings);
   const setup = access && (!access.configured || !access.authorized);
+  const blocked = pending || !page || Boolean(page.error || (page.sensitive && !confirmSensitive));
   const info = error ?? page?.error ?? reader?.error ??
     (setup ? access.configured ? 'consent-required' : 'not-configured' : undefined);
 
@@ -73,16 +87,17 @@ function Popup() {
     {page?.sensitive && <label className="sensitive">
       <input type="checkbox" checked={confirmSensitive}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />
-      此页面可能包含敏感信息，我确认可以发送可见原文。
+      此页面可能包含敏感信息，我确认可以向当前服务发送待译文字。
     </label>}
     {reader && !reader.error && <p className="notice" role="status">
       {progressLabels[reader.status]}{reader.total > 0 && ' · ' + reader.done + '/' + reader.total}
     </p>}
-    {info && <p className="notice" role="status">{errors[info]}</p>}
+    {info && <p className="notice" role="status">
+      {info === 'unsupported-page' ? '当前页面无法使用翻译。' : errors[info]}
+    </p>}
     <div className="actions">
       {setup ? <button type="button" className="primary" onClick={() => void browser.runtime.openOptionsPage()}>配置翻译服务</button>
-        : <button type="button" className="primary" disabled={pending || !page || Boolean(page.error) ||
-          Boolean(page.sensitive && !confirmSensitive)} onClick={() => void execute('start')}>
+        : <button type="button" className="primary" disabled={blocked} onClick={() => void execute('start')}>
           {active ? '重新翻译' : '开启双栏'}
         </button>}
       {active && <>
@@ -93,6 +108,16 @@ function Popup() {
         <button type="button" disabled={pending} onClick={() => void execute('stop')}>关闭双栏</button>
       </>}
     </div>
+    <div className="actions selection-actions">
+      <button type="button" disabled={page?.selectionEnabled ? pending : blocked || Boolean(setup)}
+        aria-describedby={page?.selectionEnabled || setup || !page || page.error ? undefined : 'selection-consent'}
+        onClick={() => void toggleSelection()}>
+        {page?.selectionEnabled ? '关闭选词翻译' : '开启选词翻译'}
+      </button>
+    </div>
+    {page && !page.error && !setup && !page.selectionEnabled && <p className="selection-consent" id="selection-consent">
+      点击「译」后，选中文字会发送给当前翻译服务。
+    </p>}
   </main>;
 }
 

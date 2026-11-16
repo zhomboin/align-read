@@ -245,7 +245,7 @@ function Options() {
         <p className="hint">密钥保存在本机浏览器扩展存储中。请在 Google Cloud 中把密钥限制为 Cloud Translation API。</p>
         <label className="check"><input type="checkbox" checked={googleConsent} disabled={busy}
           onChange={(event) => setGoogleConsent(event.target.checked)} />
-          我同意在开启双栏时，将可翻译的网页文本和语言参数发送给 Google Cloud Translation。</label>
+          我同意在使用 Google Cloud Translation 翻译时，将待译文字和语言参数发送给该服务。</label>
         <p className="hint">密码、表单和可编辑区域会跳过。敏感页面需要额外确认。</p>
         <div className="actions">
           <button className="primary" type="submit" disabled={busy}>保存 Google 设置</button>

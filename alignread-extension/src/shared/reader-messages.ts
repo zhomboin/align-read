@@ -87,7 +87,7 @@ export type ReaderState = {
   status: TaskStatus; done: number; total: number; failed: number; error?: ErrorCode; cacheBytes?: number;
 };
 export type PageState = {
-  settings: PublicSettings; reader: ReaderState | null;
+  settings: PublicSettings; reader: ReaderState | null; selectionEnabled: boolean;
   hostname?: string; sensitive: boolean; error?: ErrorCode;
 };
 export type TranslationItem = { id: string; text: string };
@@ -95,7 +95,8 @@ export type BatchResult = { id: string; items: TranslationItem[] };
 
 export type PopupMessage =
   | { type: 'page'; tabId: number }
-  | { type: 'start'; tabId: number; provider: ProviderId; options: ReadingOptions; confirmSensitive: boolean }
+  | { type: 'start' | 'selection-start'; tabId: number; provider: ProviderId; options: ReadingOptions; confirmSensitive: boolean }
+  | { type: 'selection-stop'; tabId: number }
   | { type: 'control'; tabId: number; command: 'pause' | 'resume' | 'stop' };
 export type OptionsMessage =
   | { type: 'settings' }
