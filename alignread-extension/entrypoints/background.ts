@@ -12,14 +12,17 @@ import {
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
 } from '../src/shared/reader-messages';
+import { MAX_SELECTION_LENGTH, type SelectionCommand, type SelectionRequest } from '../src/shared/selection-messages';
 
-type Grant = { session: Session; documentId: string; hostname: string; revision: string; provider: ProviderId };
-type Job = { sessionId: string; controller: AbortController; promise: ReturnType<typeof translate> };
-const jobs = new Map<number, Job>();
+type Grant = { session: Session; documentId: string; hostname: string; revision: string; provider: ProviderId; pageUrl?: string };
+type SessionKind = 'reader' | 'selection';
+type Batch = Extract<ReaderRequest, { type: 'batch' }>;
+type Job = { sessionId: string; batchId: string; controller: AbortController; promise: ReturnType<typeof translate> };
+const jobs = new Map<string, Job>();
 const tabCommands = new Map<number, Promise<unknown>>();
 const limiter: Promise<unknown>[] = [Promise.resolve(), Promise.resolve()];
 let slot = 0;
-const grantKey = (tabId: number) => 'reader:' + tabId;
+const grantKey = (tabId: number, kind: SessionKind) => kind + ':' + tabId;
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message: unknown, sender, reply) => {
@@ -31,17 +34,22 @@ export default defineBackground(() => {
     } else if (sender.url === browser.runtime.getURL('/options.html')) {
       response = options(message as unknown as OptionsMessage);
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
-      response = reader(sender.tab.id, sender.documentId, message as unknown as ReaderRequest);
+      response = typeof message.type === 'string' && message.type.startsWith('selection:')
+        ? selection(sender.tab.id, sender.documentId, sender.url, message as unknown as SelectionRequest)
+        : reader(sender.tab.id, sender.documentId, message as unknown as ReaderRequest);
     }
     if (!response) return;
     void response.then(reply, () => reply(failure('unavailable')));
     return true;
   });
 
-  browser.tabs.onRemoved.addListener((tabId) => { void onTab(tabId, () => clearGrant(tabId)).catch(() => undefined); });
+  browser.tabs.onRemoved.addListener((tabId) => {
+    void onTab(tabId, () => Promise.all([clearGrant(tabId, 'reader'), clearGrant(tabId, 'selection')]))
+      .catch(() => undefined);
+  });
   browser.permissions.onRemoved.addListener(({ origins }) => {
     if (origins?.length) {
-      void stopReaders(({ provider }) => origins.includes(TRANSLATION_PROVIDERS[provider ?? 'google'].origin))
+      void stopSessions(({ provider }) => origins.includes(TRANSLATION_PROVIDERS[provider ?? 'google'].origin))
         .catch(() => undefined);
     }
   });
@@ -55,36 +63,38 @@ function onTab<T>(tabId: number, action: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function getGrant(tabId: number): Promise<Grant | undefined> {
-  const key = grantKey(tabId);
+async function getGrant(tabId: number, kind: SessionKind): Promise<Grant | undefined> {
+  const key = grantKey(tabId, kind);
   return (await browser.storage.session.get(key))[key] as Grant | undefined;
 }
 
-async function clearGrant(tabId: number, sessionId?: string) {
-  const grant = await getGrant(tabId);
+async function clearGrant(tabId: number, kind: SessionKind, sessionId?: string) {
+  const grant = await getGrant(tabId, kind);
   if (!grant || (sessionId && sessionId !== grant.session.id)) return;
-  const job = jobs.get(tabId);
+  const key = grantKey(tabId, kind);
+  const job = jobs.get(key);
   if (job?.sessionId === grant.session.id) {
     job.controller.abort();
-    jobs.delete(tabId);
+    jobs.delete(key);
   }
-  await browser.storage.session.remove(grantKey(tabId));
+  await browser.storage.session.remove(key);
 }
 
-async function stopReaders(matches: (grant: Grant) => boolean) {
+async function stopSessions(matches: (grant: Grant) => boolean) {
   const stored = await browser.storage.session.get(null);
-  await Promise.all(Object.entries(stored)
-    .filter(([key]) => key.startsWith('reader:'))
-    .map(async ([key, value]) => {
-      const tabId = Number(key.slice(7));
-      const grant = value as Grant;
-      if (!matches(grant)) return;
-      await onTab(tabId, async () => {
-        if ((await getGrant(tabId))?.session.id !== grant.session.id) return;
-        await clearGrant(tabId, grant.session.id);
-        await send(tabId, grant.documentId, { type: 'reader:stop' }).catch(() => undefined);
-      });
-    }));
+  await Promise.all(Object.entries(stored).map(async ([key, value]) => {
+    const parts = /^(reader|selection):(\d+)$/.exec(key);
+    if (!parts) return;
+    const kind = parts[1] as SessionKind;
+    const tabId = Number(parts[2]);
+    const grant = value as Grant;
+    if (!matches(grant)) return;
+    await onTab(tabId, async () => {
+      if ((await getGrant(tabId, kind))?.session.id !== grant.session.id) return;
+      await clearGrant(tabId, kind, grant.session.id);
+      await send(tabId, grant.documentId, { type: `${kind}:stop` }).catch(() => undefined);
+    });
+  }));
 }
 
 async function updateProviderSettings(update: (current: Settings) => Settings) {
@@ -104,7 +114,7 @@ async function updateProviderSettings(update: (current: Settings) => Settings) {
     previousRevision = current.revision;
     return { ...next, revision: crypto.randomUUID() };
   });
-  if (previousRevision !== undefined) await stopReaders(({ revision }) => revision === previousRevision);
+  if (previousRevision !== undefined) await stopSessions(({ revision }) => revision === previousRevision);
   return saved;
 }
 
@@ -117,7 +127,7 @@ async function options(message: OptionsMessage) {
       const settings = await updateSettings((current) => ({
         ...current, ...normalize(message.preferences), authorized: current.authorized,
       }));
-      await stopReaders(({ hostname }) => isDisabled(hostname, settings));
+      await stopSessions(({ hostname }) => isDisabled(hostname, settings));
       if (!settings.cache) await clearCaches(true);
       return success(await publicSettings(settings));
     }
@@ -168,7 +178,7 @@ async function options(message: OptionsMessage) {
         ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
         checks: {},
       }));
-      await stopReaders(() => true);
+      await stopSessions(() => true);
       await browser.permissions.remove({ origins: Object.values(TRANSLATION_PROVIDERS).map(({ origin }) => origin) });
       return success(await publicSettings(settings));
     }
@@ -219,26 +229,42 @@ async function popup(message: PopupMessage) {
   const sensitive = Boolean(available && isSensitive(url.hostname, url.pathname));
 
   if (message.type === 'page') {
-    const reader = available ? await browser.tabs.sendMessage(
-      tabId, { type: 'reader:state' } satisfies ReaderCommand, { frameId: 0 },
-    ).catch(() => null) as ReaderState | null : null;
+    const grant = available && !disabled ? await getGrant(tabId, 'selection') : undefined;
+    const [reader, selectionId] = await Promise.all([
+      available ? browser.tabs.sendMessage(tabId, { type: 'reader:state' } satisfies ReaderCommand, { frameId: 0 })
+        .catch(() => null) as Promise<ReaderState | null> : null,
+      grant && grant.pageUrl === tab.url ? send(tabId, grant.documentId, { type: 'selection:state' }).catch(() => null) : null,
+    ]);
     return success<PageState>({
-      settings: view, reader, hostname: url?.hostname, sensitive,
+      settings: view, reader, selectionEnabled: Boolean(grant && selectionId === grant.session.id),
+      hostname: url?.hostname, sensitive,
       error: !available ? 'unsupported-page' : disabled ? 'site-disabled' : undefined,
     });
   }
 
+  if (message.type === 'selection-stop') {
+    const grant = await getGrant(tabId, 'selection');
+    if (grant) {
+      await clearGrant(tabId, 'selection', grant.session.id);
+      await send(tabId, grant.documentId, { type: 'selection:stop' }).catch(() => undefined);
+    }
+    return success(null);
+  }
+
   if (message.type === 'control') {
     if (!['stop', 'pause', 'resume'].includes(message.command)) return failure('unavailable');
-    const grant = await getGrant(tabId);
+    const grant = await getGrant(tabId, 'reader');
     if (!grant) return success(null);
-    if (message.command === 'stop') await clearGrant(tabId, grant.session.id);
+    if (message.command === 'stop') await clearGrant(tabId, 'reader', grant.session.id);
     return success(await send(tabId, grant.documentId, {
       type: 'reader:' + message.command,
     } as ReaderCommand).catch(() => null));
   }
 
-  if (message.type !== 'start' || !isReadingOptions(message.options)) return failure('unavailable');
+  if ((message.type !== 'start' && message.type !== 'selection-start') || !isReadingOptions(message.options)) {
+    return failure('unavailable');
+  }
+  const kind = message.type === 'start' ? 'reader' : 'selection';
   if (!available) return failure('unsupported-page');
   if (disabled) return failure('site-disabled');
   if (message.provider !== settings.provider) return failure('provider-changed');
@@ -260,9 +286,9 @@ async function popup(message: PopupMessage) {
   if (!documentId) return failure('unsupported-page');
 
   try {
-    await send(tabId, documentId, { type: 'reader:state' });
+    await send(tabId, documentId, { type: `${kind}:state` });
   } catch {
-    await browser.scripting.executeScript({ target: { tabId, documentIds: [documentId] }, files: ['/reader.js'] });
+    await browser.scripting.executeScript({ target: { tabId, documentIds: [documentId] }, files: [`/${kind}.js`] });
   }
 
   const current = await getSettings();
@@ -273,30 +299,30 @@ async function popup(message: PopupMessage) {
     id: crypto.randomUUID(), ratio: view.ratio,
     highlight: view.highlight, syncScroll: view.syncScroll, cache: view.cache && !sensitive,
   };
-  await clearGrant(tabId);
+  await clearGrant(tabId, kind);
   await browser.storage.session.set({
-    [grantKey(tabId)]: { session, documentId, hostname: url.hostname, revision: settings.revision,
-      provider: settings.provider } satisfies Grant,
+    [grantKey(tabId, kind)]: { session, documentId, hostname: url.hostname, revision: settings.revision,
+      provider: settings.provider, ...(kind === 'selection' && { pageUrl: tab.url }) } satisfies Grant,
   });
   try {
-    const result = await send(tabId, documentId, { type: 'reader:start', session });
-    if (!result?.ok) await clearGrant(tabId, session.id);
+    const result = await send(tabId, documentId, { type: `${kind}:start`, session });
+    if (!result?.ok) await clearGrant(tabId, kind, session.id);
     return result;
   } catch {
-    await clearGrant(tabId, session.id);
+    await clearGrant(tabId, kind, session.id);
     return failure('unavailable');
   }
 }
 
-function send(tabId: number, documentId: string, message: ReaderCommand) {
+function send(tabId: number, documentId: string, message: ReaderCommand | SelectionCommand) {
   return browser.tabs.sendMessage(tabId, message, { documentId });
 }
 
 async function reader(tabId: number, documentId: string, message: ReaderRequest) {
-  const grant = await getGrant(tabId);
+  const grant = await getGrant(tabId, 'reader');
   if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) return failure('stale');
   if (message.type === 'closed') {
-    await onTab(tabId, () => clearGrant(tabId, message.sessionId));
+    await onTab(tabId, () => clearGrant(tabId, 'reader', message.sessionId));
     return success(null);
   }
   if (message.type === 'resize' && Number.isFinite(message.ratio)) {
@@ -306,33 +332,72 @@ async function reader(tabId: number, documentId: string, message: ReaderRequest)
   if (message.type !== 'batch' || typeof message.batchId !== 'string' || !validItems(message.items)) {
     return failure('invalid-response');
   }
-  if (jobs.has(tabId)) return failure('rate-limit');
+  return queueBatch(tabId, 'reader', grant, message);
+}
+
+async function selection(tabId: number, documentId: string, url: string | undefined, message: SelectionRequest) {
+  const grant = await getGrant(tabId, 'selection');
+  if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) return failure('stale');
+  if (message.type === 'selection:closed') {
+    await onTab(tabId, () => clearGrant(tabId, 'selection', message.sessionId));
+    return success(null);
+  }
+  if (message.type === 'selection:cancel') {
+    const job = jobs.get(grantKey(tabId, 'selection'));
+    if (job?.sessionId === grant.session.id && job.batchId === message.requestId) job.controller.abort();
+    return success(null);
+  }
+  if (message.type !== 'selection:translate' || !url || url !== grant.pageUrl) return failure('stale');
+  if (typeof message.requestId !== 'string' || typeof message.text !== 'string' ||
+      message.text.length > MAX_SELECTION_LENGTH) return failure('invalid-response');
+  const batch: Batch = {
+    type: 'batch', sessionId: message.sessionId, batchId: message.requestId,
+    items: [{ id: message.requestId, text: message.text.trim() }],
+  };
+  if (!validItems(batch.items)) return failure('invalid-response');
+  const result = await queueBatch(tabId, 'selection', grant, batch);
+  if (!result.ok) return result;
+  const item = result.value.items[0];
+  if (result.value.id !== message.requestId || item?.id !== message.requestId || !item.text.trim()) {
+    return failure('invalid-response');
+  }
+  return success(item.text);
+}
+
+async function queueBatch(tabId: number, kind: SessionKind, grant: Grant, message: Batch) {
+  const key = grantKey(tabId, kind);
+  const current = jobs.get(key);
+  if (current && current.sessionId !== grant.session.id) return failure('stale');
+  if (current && kind === 'reader') return failure('rate-limit');
+  current?.controller.abort();
   const controller = new AbortController();
   const lane = slot++ % limiter.length;
-  const promise = (limiter[lane] ?? Promise.resolve()).then(() => translate(tabId, grant, message, controller.signal));
+  const promise = limiter[lane]!.then(() => translate(tabId, kind, grant, message, controller.signal));
   limiter[lane] = promise.catch(() => undefined);
-  jobs.set(tabId, { sessionId: grant.session.id, controller, promise });
+  jobs.set(key, { sessionId: grant.session.id, batchId: message.batchId, controller, promise });
   try {
     return await promise;
   } finally {
-    if (jobs.get(tabId)?.promise === promise) jobs.delete(tabId);
+    if (jobs.get(key)?.promise === promise) jobs.delete(key);
   }
 }
 
-async function translate(tabId: number, grant: Grant, message: Extract<ReaderRequest, { type: 'batch' }>, signal: AbortSignal) {
+async function translate(tabId: number, kind: SessionKind, grant: Grant, message: Batch, signal: AbortSignal) {
   const settings = await getSettings();
   const provider = grant.provider ?? 'google';
-  if (signal.aborted || (await getGrant(tabId))?.session.id !== grant.session.id ||
+  if (signal.aborted || (await getGrant(tabId, kind))?.session.id !== grant.session.id ||
       settings.revision !== grant.revision || settings.provider !== provider || isDisabled(grant.hostname, settings)) {
     return failure('stale');
   }
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
+  if (kind === 'selection' && (await browser.tabs.get(tabId)).url !== grant.pageUrl) return failure('stale');
   if (signal.aborted || (await getSettings()).revision !== grant.revision) return failure('stale');
   const request = {
     source: grant.session.source, target: grant.session.target, range: grant.session.range,
     id: message.batchId, items: message.items,
   };
-  return translateWithProvider(provider, settings, request, signal);
+  const result = await translateWithProvider(provider, settings, request, signal);
+  return signal.aborted ? failure('stale') : result;
 }
 
 function translateWithProvider(provider: ProviderId, settings: Settings, request: TranslationBatch, signal: AbortSignal) {

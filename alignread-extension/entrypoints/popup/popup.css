@@ -13,3 +13,5 @@ button.primary { color: #fff; border-color: #285946; background: #285946; }
 .sensitive { display: flex; align-items: start; gap: 3px; margin-block: 8px; color: #754620; }
 .notice { max-width: 284px; margin: 8px 0; line-height: 1.5; }
 .actions { justify-content: start; margin-top: 12px; }
+.selection-actions { border-top: 1px solid #dce2d9; padding-top: 10px; }
+.selection-consent { max-width: 284px; margin: 6px 0 0; color: #425f51; font-size: 12px; }

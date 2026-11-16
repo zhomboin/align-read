@@ -1,0 +1,41 @@
+[hidden] { display: none !important; }
+button { box-sizing: border-box; font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid #285946; outline-offset: 2px; }
+
+.trigger, .card {
+  position: absolute;
+  pointer-events: auto;
+  color-scheme: light;
+  font: 14px/1.55 system-ui, sans-serif;
+  color: #21332b;
+  border: 1px solid #b9c9bd;
+  background: #faf9f6;
+  border-radius: 8px;
+  box-shadow: 0 4px 18px #182e2529;
+}
+
+.trigger { width: 34px; height: 34px; color: #f8fbf7; background: #285946; font-weight: 650; }
+.trigger:hover { background: #1a4736; }
+
+.card {
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(320px, calc(100dvh - 16px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 11px 14px 13px;
+  user-select: none;
+}
+
+.head, .actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.head { margin-bottom: 8px; }
+.languages { font-size: 12px; color: #425f51; }
+.source, .result, .status { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.source { color: #425f51; }
+.result { padding-top: 10px; margin-top: 10px; border-top: 1px solid #dce2d9; }
+.status:not(:empty), .actions { margin-top: 10px; }
+.status { font-size: 13px; }
+.actions { justify-content: flex-end; }
+.actions button, .close { border: 1px solid #b9c9bd; border-radius: 5px; padding: 3px 8px; background: #f2f6f0; }
+.actions button:hover, .close:hover { background: #e4eee3; }
+.close { line-height: 1.2; font-size: 18px; padding: 2px 7px; }

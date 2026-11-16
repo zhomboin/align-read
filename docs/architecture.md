@@ -1,8 +1,8 @@
 # AlignRead（对阅）实现架构
 
-本文记录 0.1.3 的双栏翻译实现。功能范围见 [产品需求](AlignRead_PRD_v1.1.md)，兼容性与发布进度见 [测试计划](test-plan.md)。
+本文记录双栏与选词翻译实现。功能范围见 [产品需求](AlignRead_PRD_v1.1.md)，兼容性与发布进度见 [测试计划](test-plan.md)。
 
-## 1. 首版需求
+## 1. 已实现功能
 
 | 范围 | PRD | 实际交付 |
 | --- | --- | --- |
@@ -11,10 +11,11 @@
 | 原译对齐 | F-04、F-05 | 段落级双向悬停高亮、直接点击定位和按锚点联动。译文支持 Enter 定位，同步默认开启 |
 | 翻译执行 | F-06 | 接入 Google Cloud Translation Basic 和有道智云。分批翻译、增量展示、失败可重试，多个标签页独立运行 |
 | 恢复与边界 | F-07、F-08 | 关闭和失效时清理扩展的页面改动；受限页面和布局冲突给出原因；外发前确认，排除敏感输入 |
+| 选词翻译 | F-09 | 独立按标签页启停。选中原文后按需翻译，卡片支持复制、重试和关闭 |
 
 默认源语言自动检测，目标为简体中文。默认范围是页面中可见且可阅读的文字，包含可识别的导航、侧栏和页脚，范围覆盖可滚动页面。用户可切换为仅正文。MVP 发布以 AC-01 至 AC-16 为准。
 
-P1 包括选词弹窗、原文下方插入译文、替换式翻译、句子级对齐及 SPA 增量翻译。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。原生 PDF、受限浏览器页面及 Canvas 渲染内容按 PRD 边界处理；页面内的 iframe 内容不纳入首版提取。
+后续 P1 包括 SPA 增量翻译、原文下方插入译文、替换式翻译及句子级对齐。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。原生 PDF、受限浏览器页面、iframe 和 Canvas 内容按 PRD 边界处理。
 
 ## 2. 技术基线与代码结构
 
@@ -26,6 +27,7 @@ alignread-extension/
   entrypoints/
     background.ts              # MV3 Service Worker
     reader.ts                  # 由 scripting API 在顶层文档按需注入
+    selection.ts               # 按需注入选词功能
     popup/                     # 当前标签页的状态与操作
     options/                   # 全局配置、站点规则和隐私设置
   src/
@@ -35,23 +37,25 @@ alignread-extension/
       layout/                  # 分栏、分隔条、页面改动记录和恢复
       alignment/               # 源节点映射、高亮、定位与滚动联动
       ui/                      # Shadow DOM 里的工具栏和译文面板
+    selection/                 # 选区检查、翻译会话与浮动卡片
     background/
       translation/             # Provider 契约、适配器、请求校验和限流
       settings/                # 设置、授权记录、存储访问
     shared/                    # 可序列化类型、消息协议和错误码
   tests/
     release-check.cjs          # 检查生产构建，运行 Worker 和 Chromium 回归
+    selection-check.cjs        # AC-P1-01 及选词边界用例
     fixtures/                  # 本地静态页面及结构样本
 ```
 
 | 运行上下文 | 持有的状态与职责 |
 | --- | --- |
 | Popup / Options | 通过 Worker 操作当前文档、读取摘要和保存配置。Popup 关闭后翻译继续。 |
-| Content Script | 每个顶层文档独立持有双栏会话、DOM 引用、映射、进度、待办队列和会话缓存。扩展 UI 挂载在 Shadow DOM。 |
+| Content Script | 每个顶层文档独立持有双栏和选词会话。各自使用 Shadow DOM 挂载界面，双栏负责段落映射、任务队列和会话缓存。 |
 | Service Worker | 接收扩展操作、执行注入、管理授权和设置、核验来自页面的请求、执行 Provider 批次并统一限流。 |
-| Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在 Reader 会话内存。 |
+| Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在各自会话内存。 |
 
-Reader 通过 WXT 的运行时入口构建，Worker 用 `chrome.scripting.executeScript` 注入已打包脚本。发布回归检查 Manifest 未注册常驻的全站 Content Script。同一文档重复注入时复用已有控制器。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
+双栏和选词脚本均由 Worker 用 `chrome.scripting.executeScript` 按需注入。同一文档重复注入时复用已有入口。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
 
 ## 3. 双栏与段落映射
 
@@ -77,10 +81,15 @@ Reader 通过 WXT 的运行时入口构建，Worker 用 `chrome.scripting.execut
 | 批次响应 | Worker → Reader | 通过原消息返回批次 ID 和翻译项 ID。Reader 将结果归入当前阅读块，处理超时、缺失结果或会话取消。 |
 | `closed`、`resize` | Reader → Worker | 当前文档关闭会话或保存栏宽偏好。关闭后 Worker 取消对应在途任务并移除临时授权。 |
 | `reader:clear-cache` | Worker → Reader | 在设置页清空或关闭缓存时，通知活跃 Reader。 |
+| `selection-start`、`selection-stop` | Popup → Worker | 校验服务和当前文档，独立管理选词会话。 |
+| `selection:start`、`selection:state`、`selection:stop` | Worker → 选词脚本 | 绑定到当前文档，挂载、查询或清理选词界面。 |
+| `selection:translate`、`selection:cancel`、`selection:closed` | 选词脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
 
 每次开启生成独立会话 ID。Worker 维护标签页与文档的授权，Reader 维护阅读树、翻译项与段落映射。刷新、导航、`pagehide` 或关闭会令旧会话失效。切换翻译服务后需重新开启。切换标签页只改变 Popup 的操作目标，各文档的翻译独立进行。
 
 Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、`error`。无活动会话时显示原文。暂停停止派发后续批次，在途批次可完成。关闭立即阻止迟到结果应用，Worker 中断或请求失败的批次可重试。
+
+选词脚本过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，界面和会话各自清理。选词译文仅保留在当前卡片内存。
 
 ## 5. Provider、缓存与权限
 
@@ -99,7 +108,7 @@ Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、
 | M2 真实翻译 | Provider 接入、外发确认、调度、缓存、错误反馈和多标签隔离 | 验证部分失败、关闭/导航、多标签、授权与敏感输入（AC-08 至 AC-15）；模拟 Worker 中断并核对批次状态 |
 | M3 稳定与发布 | 实测普通博客、技术文档及 README，验证长页性能和分发权限 | 通过 AC-01 至 AC-16；记录 100、500、1000 段表现和点击到初次反馈的时间，确认最低 Chrome 版本及站点适配范围 |
 
-0.1.3 已完成 M0 至 M3 并通过发布验收。最低支持版本在 Manifest 中声明为 Chrome 116。 [0.1.3 验收记录](test-plan.md#013-验收记录)
+选词翻译按 AC-P1-01 验收。GitHub Actions 执行 Chromium、Worker 和 ZIP 全量回归。最低支持版本在 Manifest 中声明为 Chrome 116。 [回归与验收](test-plan.md)
 
 ## 参考资料
 

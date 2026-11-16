@@ -5,8 +5,10 @@ const os = require('node:os');
 const vm = require('node:vm');
 const {spawn} = require('node:child_process');
 const {setTimeout: wait} = require('node:timers/promises');
+const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
 
-const build = process.argv[2] ?? path.resolve(__dirname, '../.output/chrome-mv3');
+const selectionOnly = process.argv.includes('--selection');
+const build = process.argv.slice(2).find(argument => argument !== '--selection') ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
 assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
@@ -18,6 +20,7 @@ const youdaoOrigin = 'https://openapi.youdao.com/*';
 const id = 'alignread-test';
 const origin = 'chrome-extension://' + id;
 const sample = 'Hello, world!';
+const selectionPopupTab = 18;
 const local = { providerSettings: {
   source: 'auto', target: 'zh-CN', range: 'visible', provider: 'google',
   authorized: true, key: 'legacy-google-secret', youdao: null, youdaoAuthorized: false,
@@ -51,7 +54,18 @@ function startWorker() {
       onRemoved: noopEvent,
       async query() { return []; },
       async get(id) { return tabs.get(id) ?? {url: 'https://docs.example.test/start', documentId: 'doc'}; },
-      async sendMessage(id, message) {
+      async sendMessage(id, message, target) {
+        const tab = tabs.get(id);
+        if (message.type.startsWith('selection:')) {
+          if (!tab?.selectionInjected || tab.documentId !== target.documentId) throw Error('No selection script');
+          if (message.type === 'selection:state') return tab.selectionId ?? null;
+          if (message.type === 'selection:start') {
+            tab.selectionId = message.session.id;
+            return {ok: true, value: null};
+          }
+          delete tab.selectionId;
+          return null;
+        }
         if (message.type !== 'reader:start') return null;
         return tabs.has(id) ? {ok: true} : {ok: false, error: 'layout-start'};
       },
@@ -62,10 +76,14 @@ function startWorker() {
       onRemoved: noopEvent,
     },
     scripting: {
-      async executeScript({target}) {
+      async executeScript({target, files}) {
         injects++;
         const tab = await chrome.tabs.get(target.tabId);
         if (tab.restricted) throw Error('scripting permission denied');
+        if (files?.includes('/selection.js')) {
+          assert.deepEqual(Array.from(target.documentIds), [tab.documentId]);
+          tab.selectionInjected = true;
+        }
         return [{documentId: tab.documentId, result: tab.url}];
       },
     },
@@ -308,7 +326,10 @@ async function checkOptions() {
       if (message.type === 'mock-permission') {
         result = permitted;
         if (result) message.origins.forEach(host => grants.add(host));
-      } else result = await request(message);
+      } else {
+        const popup = ['page', 'selection-start', 'selection-stop'].includes(message.type);
+        result = await request(message, popup ? 'popup' : 'options');
+      }
       await send('Runtime.evaluate', {expression: 'completeRequest(' + id + ',' + JSON.stringify(result) + ')'}, sessionId);
     }
   }
@@ -325,8 +346,13 @@ async function checkOptions() {
     await page('Page.enable');
     await page('Runtime.enable');
     await page('Runtime.addBinding', {name: 'alignreadRequest'});
-    await page('Page.addScriptToEvaluateOnNewDocument', {source: '(' + initBrowser.toString() + ')(' + JSON.stringify(manifest.version) + ')'});
+    await page('Page.addScriptToEvaluateOnNewDocument', {
+      source: `(${initBrowser})(${JSON.stringify(manifest.version)}, ${selectionPopupTab})`,
+    });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
+    await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
+    await checkSelectionPage({page, evaluate, until, build, initReader});
+    if (selectionOnly) return;
     await page('Page.navigate', {url: 'http://alignread.test/options.html'});
     const section = 'document.querySelectorAll("form section")[0]';
     const status = section + '?.querySelector(".connection-status")';
@@ -575,7 +601,7 @@ async function checkOptions() {
     await replaceFixture(tabsFixture());
     assert((await startLayout('tabs', 'main')).ok);
     await until(async () => (await readerState())?.status === 'ready');
-    const tabs = await evaluate(`{
+    const tabLayout = await evaluate(`{
       const rows = [...pane.querySelectorAll('[data-reading-navigation=tabs]')];
       const lists = rows.map((row) => {
         const items = [...row.children];
@@ -592,12 +618,12 @@ async function checkOptions() {
       const ordinary = pane.querySelector('article ul:not([data-reading-navigation])');
       ({lists, ordinary: getComputedStyle(ordinary).display, markers: getComputedStyle(ordinary.firstElementChild).listStyleType});
     }`);
-    assert.equal(tabs.lists.length, 2);
-    assert(tabs.lists.every(({horizontal, markers}) => horizontal && markers === 'none'), JSON.stringify(tabs));
-    assert.match(tabs.lists[0].active, /Overview/);
-    assert.match(tabs.lists[1].active, /Reference/);
-    assert.equal(tabs.ordinary, 'block');
-    assert.equal(tabs.markers, 'disc');
+    assert.equal(tabLayout.lists.length, 2);
+    assert(tabLayout.lists.every(({horizontal, markers}) => horizontal && markers === 'none'), JSON.stringify(tabLayout));
+    assert.match(tabLayout.lists[0].active, /Overview/);
+    assert.match(tabLayout.lists[1].active, /Reference/);
+    assert.equal(tabLayout.ordinary, 'block');
+    assert.equal(tabLayout.markers, 'disc');
     assert.equal(await evaluate('pane.querySelector("[data-reading-navigation=tabs] li:nth-child(2) a").href'), 'https://example.com/learn');
     assert.equal(await evaluate('readerPayloads.flat().some(text => /Do not translate this button|Hidden tab/.test(text))'), false);
     assert.equal(await evaluate(`{
@@ -885,7 +911,7 @@ function initReader() {
   };
 }
 
-function initBrowser(version) {
+function initBrowser(version, tabId) {
   const requests = new Map();
   let sequence = 0;
   function request(message) {
@@ -896,6 +922,7 @@ function initBrowser(version) {
     });
   }
   globalThis.chrome ??= {}; chrome.runtime = {id: 'alignread-test', getManifest: () => ({version}), sendMessage: request};
+  chrome.tabs = {async query() { return [{id: tabId}]; }};
   chrome.permissions = {request: ({origins}) => request({type: 'mock-permission', origins})};
   globalThis.completeRequest = (id, result) => {
     const resolve = requests.get(id);
@@ -907,4 +934,11 @@ function initBrowser(version) {
     node.dispatchEvent(new Event(event, {bubbles: true}));
   };
 }
-checkWorker().then(checkOptions).catch(error => { console.error(error); process.exitCode = 1; });
+async function run() {
+  if (selectionOnly) startWorker();
+  else await checkWorker();
+  await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
+  await checkOptions();
+}
+
+run().catch(error => { console.error(error); process.exitCode = 1; });
