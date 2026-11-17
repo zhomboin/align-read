@@ -261,13 +261,24 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   tabs.set(tabId, tab);
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
   const button = 'document.querySelector(".selection-actions button")';
+  const service = 'document.querySelector(".provider-field select")';
+  const primary = 'document.querySelector("button.primary")';
   const label = () => evaluate(button + '?.textContent.trim()');
+  const choose = (provider) => evaluate(`fill(${service}, ${JSON.stringify(provider)}, 'change')`);
+  const serviceOptions = () => evaluate(`Array.from(${service}.options, option => option.value)`);
   await until(() => evaluate('document.body?.textContent.includes("配置翻译服务")'));
   assert(await evaluate(button + '.disabled'));
+  assert(await evaluate(service + '.disabled'));
+  assert.deepEqual(await serviceOptions(), ['']);
+  assert.deepEqual(await request({type: 'switch-provider', tabId, provider: 'youdao'}, 'popup'),
+    {ok: false, error: 'not-configured'});
   await saveYoudao({appKey: 'popup-test-id', appSecret: 'popup-test-secret'});
-  await request({type: 'select-provider', provider: 'youdao'});
   grants.add(youdaoOrigin);
+  await until(() => evaluate(service + '?.disabled === false'));
+  assert.deepEqual(await serviceOptions(), ['', 'youdao']);
+  await choose('youdao');
   await until(() => evaluate(button + '?.disabled === false'));
+  assert.equal(await evaluate(service + '.value'), 'youdao');
   assert.equal(await label(), '开启选词翻译');
   assert((await evaluate('document.getElementById(' + button + '.getAttribute("aria-describedby")).textContent')).includes('选中文字'));
 
@@ -280,10 +291,31 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   await evaluate(button + '.click()');
   await until(async () => (await label()) === '开启选词翻译');
   assert.equal(tab.selectionId, undefined);
+
+  await evaluate(`fill(document.querySelector('.language-fields label:nth-child(2) select'), 'ja', 'change')`);
+  await evaluate(primary + '.click()');
+  await until(() => evaluate(primary + '?.textContent.trim() === "重新翻译"'));
+  await evaluate(button + '.click()');
+  await until(async () => (await label()) === '关闭选词翻译');
+  assert(tab.readerState && tab.selectionId);
+  await request({type: 'save-google', key: 'popup-test-google', authorized: false});
+  await until(async () => (await serviceOptions()).length === 2);
+  assert.deepEqual(await serviceOptions(), ['google', 'youdao']);
+  assert(await evaluate(service + '.options[0].textContent.includes("待授权")'));
+  await choose('google');
+  await until(() => evaluate(`${service}.value === "google" && ${primary}.textContent.trim() === "配置翻译服务"`));
+  assert(await evaluate(button + '.disabled'));
+  assert.equal(tab.selectionId, undefined);
+  assert.equal(tab.readerState, undefined);
+  assert.equal(await evaluate('document.querySelector(".language-fields label:nth-child(2) select").value'), 'ja');
+  await page('Page.reload');
+  await until(() => evaluate(service + '?.value === "google"'));
+  await choose('youdao');
+  await until(() => evaluate(button + '?.disabled === false'));
   assert.equal(calls.length, count);
   await request({type: 'reset'});
   tabs.delete(tabId);
-  console.log('Built Popup activated and stopped selection translation independently without submitting text.');
+  console.log('Built Popup switched configured services, persisted the choice, and stopped both prior sessions without submitting text.');
 }
 
 function initSelection() {

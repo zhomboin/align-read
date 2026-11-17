@@ -24,7 +24,7 @@ h1 { font-size: 22px; line-height: 1.2; }
 header button { flex: none; min-block-size: 36px; padding: 6px 12px; white-space: nowrap; }
 button:not(.primary):hover:not(:disabled) { background: #f4f5f6; }
 
-.provider-name { margin-block: 12px 5px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.provider-field { margin-block-start: 14px; }
 .language-fields { margin-block: 14px; gap: 10px; }
 .sensitive { margin-block: 12px; color: #744822; }
 

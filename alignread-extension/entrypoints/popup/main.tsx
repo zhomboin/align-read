@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
-  TRANSLATION_PROVIDERS, defaults, errors, selectedProviderAccess,
+  TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
   type ErrorCode, type PageState, type ProviderId, type ReadingOptions, type ReaderState,
 } from '../../src/shared/reader-messages';
 import '../../src/shared/settings-controls.css';
@@ -14,6 +14,7 @@ const progressLabels = {
   preparing: '正在提取页面内容', translating: '正在翻译', paused: '已暂停',
   partial: '已显示部分译文', ready: '翻译完成', error: '翻译遇到问题',
 };
+const providers = Object.keys(TRANSLATION_PROVIDERS).filter(isProviderId);
 
 function Popup() {
   const [tabId, setTabId] = useState<number>();
@@ -22,29 +23,52 @@ function Popup() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<ErrorCode>();
   const [confirmedProvider, setConfirmedProvider] = useState<ProviderId>();
+  const initialized = useRef(false);
   const provider = page?.settings.provider;
   const confirmSensitive = provider !== undefined && confirmedProvider === provider;
 
   useEffect(() => {
     let disposed = false;
-    let timer = 0;
-    void browser.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
+    void browser.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
       if (disposed) return;
       if (tab?.id === undefined) { setError('unsupported-page'); return; }
       setTabId(tab.id);
-      const update = async (initial: boolean) => {
-        const result = await request<PageState>({ type: 'page', tabId: tab.id! });
-        if (disposed) return;
-        if (result.ok) {
-          setPage(result.value);
-          if (initial) setChoice(result.value.settings);
-        } else if (initial) setError(result.error);
-        timer = window.setTimeout(() => void update(false), 900);
-      };
-      void update(true);
-    }, () => setError('unavailable'));
-    return () => { disposed = true; clearTimeout(timer); };
+    }, () => { if (!disposed) setError('unavailable'); });
+    return () => { disposed = true; };
   }, []);
+
+  useEffect(() => {
+    if (tabId === undefined || pending) return;
+    let disposed = false;
+    let timer = 0;
+    const update = async () => {
+      const result = await request<PageState>({ type: 'page', tabId });
+      if (disposed) return;
+      if (result.ok) {
+        setPage(result.value);
+        if (!initialized.current) {
+          initialized.current = true;
+          setChoice(result.value.settings);
+          setError(undefined);
+        }
+      } else if (!initialized.current) setError(result.error);
+      timer = window.setTimeout(() => void update(), 900);
+    };
+    void update();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [tabId, pending]);
+
+  async function switchProvider(next: string) {
+    if (tabId === undefined || pending || next === provider || !isProviderId(next)) return;
+    setPending(true);
+    setError(undefined);
+    const result = await request<PageState>({ type: 'switch-provider', tabId, provider: next });
+    if (result.ok) {
+      setPage(result.value);
+      setConfirmedProvider(undefined);
+    } else setError(result.error);
+    setPending(false);
+  }
 
   async function execute(command: 'start' | 'pause' | 'resume' | 'stop') {
     if (tabId === undefined || provider === undefined || pending) return;
@@ -75,6 +99,7 @@ function Popup() {
   const reader = page?.reader;
   const active = Boolean(reader && (reader.status !== 'error' || reader.total > 0));
   const access = page && selectedProviderAccess(page.settings);
+  const configuredProviders = page ? providers.filter((id) => page.settings.providers[id].configured) : [];
   const setup = access && (!access.configured || !access.authorized);
   const blocked = pending || !page || Boolean(page.error || (page.sensitive && !confirmSensitive));
   const info = error ?? page?.error ?? reader?.error ??
@@ -85,10 +110,23 @@ function Popup() {
       <div className="brand"><img src="/icons/32.png" alt="" width="28" height="28" /><h1>AlignRead</h1></div>
       <button type="button" onClick={() => void browser.runtime.openOptionsPage()}>设置</button>
     </header>
-    {provider && <p className="provider-name">翻译服务 · {TRANSLATION_PROVIDERS[provider].label}</p>}
+    {page && <label className="field provider-field">翻译服务
+      <select value={access?.configured ? provider : ''} disabled={pending || configuredProviders.length === 0}
+        onChange={(event) => void switchProvider(event.target.value)}>
+        {!access?.configured && <option value="" disabled>
+          {configuredProviders.length ? '选择已配置的服务' : '暂无已配置的服务'}
+        </option>}
+        {configuredProviders.map((id) => {
+          const { consent, hostPermission } = page.settings.providers[id];
+          return <option key={id} value={id}>
+            {TRANSLATION_PROVIDERS[id].label}{consent && hostPermission ? '' : '（待授权）'}
+          </option>;
+        })}
+      </select>
+    </label>}
     <LanguageFields value={choice} change={setChoice} locked={pending || Boolean(page?.error)} />
     {page?.sensitive && <label className="check sensitive">
-      <input type="checkbox" checked={confirmSensitive}
+      <input type="checkbox" checked={confirmSensitive} disabled={pending}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />
       <span>此页面可能包含敏感信息，我确认可以向当前服务发送待译文字。</span>
     </label>}
