@@ -6,7 +6,7 @@
 
 宣传素材可分别上传到「小型宣传图块」和「顶部宣传图块」。 [440×280 小型宣传图 PNG](store/promo-small.png) · [1400×560 顶部宣传图 JPEG](store/promo-marquee.jpg)
 
-商品详情的「屏幕截图」可以按下列顺序上传。五张均为 1280×800 的 24 位 PNG，使用当前源码的生产构建截图。阅读画面使用本地演示文章和预设译文。上传前核对送审包包含图中展示的选词翻译和新版服务设置。 [商店图片要求](https://developer.chrome.com/docs/webstore/images)
+商品详情的「屏幕截图」可以按下列顺序上传。五张均为 1280×800 的 24 位 PNG，使用扩展生产构建的截图。阅读画面使用本地演示文章和预设译文。上传前核对截图与送审包的功能和界面一致。 [商店图片要求](https://developer.chrome.com/docs/webstore/images)
 
 1. [双栏对照阅读](store/dual-pane.png)
 2. [点击译文定位并高亮原文](store/paragraph-highlight.png)
@@ -20,7 +20,7 @@
 >
 > 可翻译当前网页的可见文字，也可只翻译正文。点击译文段落可定位并高亮原文。两栏可联动滚动，也可以拖动分隔线调整宽度。通过选词翻译可快速查看选中短语的译文并复制。
 >
-> 使用前需配置自己的有道智云批量文本翻译、Google Cloud Translation Basic、DeepSeek、MiniMax 或自定义 AI 服务。开启双栏或点击选区旁的「译」后，待译文字会通过 HTTPS 发送给已授权的服务。翻译服务的额度与费用由该服务运营方管理。
+> 使用前需配置自己的翻译服务凭据。支持有道智云、Google Cloud Translation、ChatGPT（OpenAI）、Gemini、Grok、GLM、Kimi、豆包、腾讯混元、DeepSeek、MiniMax 和自定义 AI。开启双栏或点击选区旁的「译」后，待译文字会通过 HTTPS 发送给已授权的服务。翻译服务的额度与费用由该服务运营方管理。
 
 ## 隐私申报
 
@@ -37,7 +37,7 @@
 | `storage` | 在本机保存翻译服务凭据、授权、设置与连接测试结果，并用会话存储维护当前标签页和文档的临时翻译授权。 |
 | `translation.googleapis.com` | 用户配置并授权 Google Cloud 后，用 HTTPS 调用 Cloud Translation Basic 来翻译文字和测试连接。 |
 | `openapi.youdao.com` | 用户配置并授权有道智云后，用 HTTPS 调用批量文本翻译接口来翻译文字和测试连接。 |
-| `https://*/*`（可选） | 扩展在用户保存并授权时仅申请所选 AI 接口的 HTTPS 主机，用于翻译和连接测试。DeepSeek 和 MiniMax 使用官方接口，自定义 AI 服务由用户填写地址。 |
+| `https://*/*`（可选） | 扩展在用户保存并授权时仅申请所选 AI 接口的 HTTPS 主机，用于翻译和连接测试。AI 预设使用官方接口，自定义 AI 服务由用户填写地址。 |
 
 **远程代码**填「否」。扩展代码随 ZIP 分发，翻译接口返回文本数据。
 
@@ -48,8 +48,12 @@
 ## 发布隐私政策页面
 
 1. 在域名管理中将 `align-read.zhomboin.com` 解析到公网服务器。在 Nginx 的 HTTPS 站点中为该域名设置静态文件根目录，证书需覆盖该域名。 [Nginx HTTPS 配置](https://nginx.org/en/docs/http/configuring_https_servers.html)
-2. 将 [AlignRead 隐私政策 HTML](store/privacy-policy.html) 上传到该站点的静态文件根目录，保留文件名 `privacy-policy.html`。如果调整了 Nginx 配置，在服务器上执行 `sudo nginx -t`，检查通过后执行 `sudo systemctl reload nginx`。
-3. 在 Chrome 无痕窗口打开最终网址，确认无需登录即可看到「AlignRead 隐私政策」完整正文及适用版本 0.1.6。在 WSL 中运行下列命令，核对响应为 `200`、内容类型为 `text/html`。
+2. 在 WSL 的项目根目录运行下方命令，把 SSH 用户、主机和站点根目录换成部署环境的值。远程用户需对站点目录有写入权限。如果调整了 Nginx 配置，在服务器上执行 `sudo nginx -t`，检查通过后执行 `sudo systemctl reload nginx`。
+
+   ```bash
+   scp docs/store/privacy-policy.html '<SSH 用户>@<SSH 主机>:<站点根目录>/privacy-policy.html'
+   ```
+3. 在 Chrome 无痕窗口打开最终网址，确认无需登录即可看到「AlignRead 隐私政策」完整正文及适用版本 0.1.7。在 WSL 中运行下列命令，核对响应为 `200`、内容类型为 `text/html`。
 
    ```bash
    curl --fail --silent --show-error --location --max-time 20 --output /dev/null \
@@ -73,8 +77,8 @@
 
    ```bash
    npm run zip
-   unzip -t .output/alignread-extension-0.1.6-chrome.zip
-   sha256sum .output/alignread-extension-0.1.6-chrome.zip
+   unzip -t .output/alignread-extension-0.1.7-chrome.zip
+   sha256sum .output/alignread-extension-0.1.7-chrome.zip
    ```
 2. 登录 Chrome 网上应用店开发者后台，确认开发者账户和两步验证已设置。首次发布点击 **Add new item → Choose file → Upload**。已有商店条目时进入原条目的 **Package → Upload New Package**，版本号须高于已发布版本。 [开发者后台](https://chrome.google.com/webstore/devconsole) · [首次上传](https://developer.chrome.com/docs/webstore/publish) · [更新条目](https://developer.chrome.com/docs/webstore/update)
 3. 填写 **Store listing** 和 **Privacy**，在 **Distribution** 选择地区和可见性。如需提供给审核员的测试步骤和凭据，填写 **Test instructions**。

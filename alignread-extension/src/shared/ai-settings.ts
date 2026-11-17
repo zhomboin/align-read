@@ -1,17 +1,48 @@
 export const AI_HOST_PERMISSION = 'https://*/*';
 export const AI_FIELD_LIMITS = { endpoint: 2048, model: 200, apiKey: 1024 };
-export const MINIMAX_ENDPOINTS = {
-  cn: 'https://api.minimax.cn/v1/chat/completions',
-  global: 'https://api.minimax.io/v1/chat/completions',
+type ProviderDefinition = {
+  label: string;
+  endpoint: string;
+  model: string;
+  regions?: ReadonlyArray<{ label: string; endpoint: string }>;
+  modelLabel?: string;
 };
+
+const miniMaxChina = 'https://api.minimax.cn/v1/chat/completions';
+
 export const AI_PROVIDERS = {
   ai: { label: 'AI 翻译', endpoint: '', model: '' },
   deepseek: { label: 'DeepSeek', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash' },
-  minimax: { label: 'MiniMax', endpoint: MINIMAX_ENDPOINTS.cn, model: 'MiniMax-M3.1-Flash' },
-};
+  minimax: {
+    label: 'MiniMax', endpoint: miniMaxChina, model: 'MiniMax-M3.1-Flash',
+    regions: [
+      { label: '中国站', endpoint: miniMaxChina },
+      { label: '国际站', endpoint: 'https://api.minimax.io/v1/chat/completions' },
+    ],
+  },
+  openai: { label: 'ChatGPT（OpenAI）', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-5.4-mini' },
+  gemini: {
+    label: 'Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-flash-lite',
+  },
+  grok: { label: 'Grok', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.3' },
+  glm: { label: 'GLM（智谱）', endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-5.3-flash' },
+  kimi: { label: 'Kimi', endpoint: 'https://api.moonshot.cn/v1/chat/completions', model: 'kimi-k3' },
+  doubao: {
+    label: '豆包（火山方舟）', endpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    model: 'doubao-seed-2-0-lite-260215', modelLabel: '模型 ID 或推理接入点 ID',
+  },
+  hunyuan: { label: '腾讯混元', endpoint: 'https://tokenhub.tencentmaas.com/v1/chat/completions', model: 'hy3' },
+} satisfies Record<string, ProviderDefinition>;
 export type AiProviderId = keyof typeof AI_PROVIDERS;
 export const AI_PROVIDER_IDS = Object.keys(AI_PROVIDERS) as AiProviderId[];
-export const EMPTY_AI_SERVICES = { ai: null, deepseek: null, minimax: null };
+export const EMPTY_AI_SERVICES = Object.fromEntries(
+  AI_PROVIDER_IDS.map((provider) => [provider, null]),
+) as Record<AiProviderId, null>;
+
+export function aiProviderDefinition(provider: AiProviderId): ProviderDefinition {
+  return AI_PROVIDERS[provider];
+}
 
 export function isAiProviderId(value: unknown): value is AiProviderId {
   return typeof value === 'string' && Object.hasOwn(AI_PROVIDERS, value);
@@ -30,8 +61,9 @@ export function parseAiSettings(provider: AiProviderId, value: { endpoint?: unkn
     const url = new URL(endpoint);
     if (url.hostname.includes('*') || url.username || url.password ||
         !url.pathname.endsWith('/chat/completions')) return null;
-    if (provider === 'deepseek' && url.href !== AI_PROVIDERS.deepseek.endpoint) return null;
-    if (provider === 'minimax' && !Object.values(MINIMAX_ENDPOINTS).includes(url.href)) return null;
+    const definition = aiProviderDefinition(provider);
+    if (definition.endpoint && url.href !== definition.endpoint &&
+        !definition.regions?.some((region) => region.endpoint === url.href)) return null;
     return { endpoint: url.href, model };
   } catch {
     return null;
