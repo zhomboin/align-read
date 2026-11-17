@@ -11,7 +11,7 @@ AlignRead 是 Chrome 桌面扩展。左栏保留可交互的原网页，右栏�
 
 ## 配置翻译和开始使用
 
-1. 点击 AlignRead 图标，再点击「设置」打开完整设置页。在「翻译服务」中选择当前使用的服务，并打开对应的配置面板。
+1. 点击 AlignRead 图标，再点击「设置」打开完整设置页。在「配置服务」下拉框选择服务，填写下方表单。保存并授权后，点击「设为当前服务」启用所选服务。
    - **有道智云**。在有道控制台开通「批量文本翻译（NMT）」，填写应用 ID 和应用密钥，勾选外发授权，点击「保存有道设置」并允许访问 `openapi.youdao.com`。已保存凭据时，可留空并直接保存授权。 [有道智云批量翻译文档](https://ai.youdao.com/DOCSIRMA/html/trans/api/plwbfy/index.html)
    - **Google Cloud Translation Basic**。在 Google Cloud 项目开启计费并启用 Cloud Translation API，创建仅允许调用该 API 的密钥。在扩展里填写密钥，勾选外发授权，点击「保存 Google 设置」并允许访问 `translation.googleapis.com`。 [Google Cloud Translation 设置](https://docs.cloud.google.com/translate/docs/setup)
 2. 打开普通文章或技术文档，选择原文、译文语言以及「整页可见文字」或「仅正文」，点击「开启双栏」。默认自动检测原文语言、译为简体中文。

@@ -9,12 +9,13 @@ async function checkSettings({page, evaluate, until, manifest, request, local, s
     await click(link);
     await until(() => evaluate(`document.querySelector(${JSON.stringify(link)}).getAttribute('aria-current') === 'page'`));
   };
-  const provider = '#active-provider';
+  const provider = '#provider-editor';
   const status = 'document.querySelector(".connection-status")';
   const providerForm = 'document.querySelector(".provider-layout form")';
   const testButton = `${providerForm}.querySelector('button[type="button"]')`;
   const statusIncludes = (text) => evaluate(`${status}?.textContent.includes(${JSON.stringify(text)})`);
-  const editYoudao = () => evaluate(`Array.from(document.querySelectorAll('.provider-switch button')).find(button => button.textContent === '有道智云').click()`);
+  const editProvider = (id) => evaluate(`fill(document.querySelector('${provider}'), ${JSON.stringify(id)}, 'change')`);
+  const currentProvider = (name) => evaluate(`document.querySelector('.provider-current')?.textContent.includes(${JSON.stringify(name)})`);
 
   await request({type: 'reset'});
   await resize(220);
@@ -38,13 +39,25 @@ async function checkSettings({page, evaluate, until, manifest, request, local, s
   assert(await evaluate('document.querySelector("main").getBoundingClientRect().width > 700'));
   assert(await evaluate('document.querySelector("main").offsetLeft > document.querySelector("header").getBoundingClientRect().right'));
   assert(await noOverflow());
+  assert.equal(await evaluate('document.querySelectorAll("main select").length'), 1);
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('body, .panel, .status-panel, ${provider}, input[type=password]'),
+    (element) => getComputedStyle(element).backgroundColor)`), Array(5).fill('rgb(255, 255, 255)'));
+  assert.equal(await evaluate('getComputedStyle(document.body).backgroundImage'), 'none');
   assert(await statusIncludes('API 密钥'));
+  assert(await evaluate('document.querySelector(".set-current-provider").disabled'));
 
-  await editYoudao();
+  await editProvider('youdao');
+  assert(await statusIncludes('应用 ID'));
   assert(await statusIncludes('未保存'));
-  assert.equal(await evaluate(`document.querySelector('${provider}').value`), 'google');
+  assert(await currentProvider('Google Cloud'));
+  assert.equal(local.providerSettings.provider, 'google');
   await evaluate(`fill(${providerForm}.querySelector('input[type=text]'), 'ui-test-789012')`);
   await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), 'ui-secret')`);
+  await editProvider('google');
+  assert(await statusIncludes('API 密钥'));
+  assert.equal(await evaluate(`${providerForm}.querySelector('input[type=password]').value`), '');
+  await editProvider('youdao');
+  assert.equal(await evaluate(`${providerForm}.querySelector('input[type=password]').value`), 'ui-secret');
   await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
   await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
   await until(() => statusIncludes('尾号 9012'));
@@ -62,9 +75,13 @@ async function checkSettings({page, evaluate, until, manifest, request, local, s
   await page('Page.reload');
   await until(() => evaluate(`document.querySelector('${provider}')?.disabled === false`));
   assert.equal(await evaluate(`document.querySelector('${provider}').value`), 'google');
-  await evaluate(`fill(document.querySelector('${provider}'), 'youdao', 'change')`);
+  await editProvider('youdao');
   await until(() => statusIncludes('通过'));
+  assert.equal(local.providerSettings.provider, 'google');
+  await click('.set-current-provider');
+  await until(() => currentProvider('有道智云'));
   assert.equal(local.providerSettings.provider, 'youdao');
+  assert(await evaluate('document.querySelector(".set-current-provider").disabled'));
 
   setResponse('auth');
   await until(() => evaluate(`!${testButton}.disabled`));
