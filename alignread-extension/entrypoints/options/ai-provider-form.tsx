@@ -1,5 +1,5 @@
 import {
-  AI_FIELD_LIMITS, AI_PROVIDERS, MINIMAX_ENDPOINTS, parseAiSettings, type AiCredentials, type AiProviderId, type AiSettings,
+  AI_FIELD_LIMITS, aiProviderDefinition, parseAiSettings, type AiCredentials, type AiProviderId, type AiSettings,
 } from '../../src/shared/ai-settings';
 import type { ProviderStatus } from '../../src/shared/reader-messages';
 
@@ -18,23 +18,22 @@ type Props = {
 };
 
 export function AiProviderForm({ provider, draft, saved, status, busy, feedback, onChange, onSave, onTest }: Props) {
-  const { label } = AI_PROVIDERS[provider];
+  const { label, endpoint, regions, modelLabel = '模型名称' } = aiProviderDefinition(provider);
   const fields = parseAiSettings(provider, draft);
   const canReuseKey = saved !== null && fields?.endpoint === saved.endpoint;
   const edited = !canReuseKey || fields?.model !== saved?.model || Boolean(draft.apiKey) || draft.authorized !== status.consent;
   return <form aria-label={label} onSubmit={(event) => { event.preventDefault(); onSave(); }}>
-    {provider === 'minimax' ? <label className="field">服务地区
+    {regions ? <label className="field">服务地区
       <select name="endpoint" value={draft.endpoint} disabled={busy}
         onChange={(event) => onChange({ ...draft, endpoint: event.target.value, apiKey: '', authorized: false })}>
-        <option value={MINIMAX_ENDPOINTS.cn}>中国站</option>
-        <option value={MINIMAX_ENDPOINTS.global}>国际站</option>
+        {regions.map((region) => <option key={region.endpoint} value={region.endpoint}>{region.label}</option>)}
       </select>
     </label> : <label className="field">Chat Completions 地址
-      <input name="endpoint" type="url" autoComplete="off" spellCheck={false} required disabled={busy} readOnly={provider === 'deepseek'}
+      <input name="endpoint" type="url" autoComplete="off" spellCheck={false} required disabled={busy} readOnly={Boolean(endpoint)}
         maxLength={AI_FIELD_LIMITS.endpoint} placeholder="https://api.example.com/v1/chat/completions"
         value={draft.endpoint} onChange={(event) => onChange({ ...draft, endpoint: event.target.value })} />
     </label>}
-    <label className="field">模型名称
+    <label className="field">{modelLabel}
       <input name="model" type="text" autoComplete="off" spellCheck={false} required disabled={busy}
         maxLength={AI_FIELD_LIMITS.model} value={draft.model}
         onChange={(event) => onChange({ ...draft, model: event.target.value })} />

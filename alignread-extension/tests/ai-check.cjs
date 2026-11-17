@@ -69,7 +69,7 @@ async function aiResponse(options, mode, url) {
   if (mode === 'unknown') rows[0].index = items.length;
   if (mode === 'incomplete') rows.pop();
   const plain = JSON.stringify({items: rows});
-  if (url.includes('minimax.') && mode !== 'json-response') return streamedResponse(options, plain, mode);
+  if (body.stream && mode !== 'json-response') return streamedResponse(options, plain, mode);
   return Response.json({choices: [{finish_reason: 'stop', message: {
     content: url === deepseek.endpoint ? plain : '```json\n' + plain + '\n```',
     ...(url.includes('minimax.') && {reasoning_content: 'Separate reasoning field'}),

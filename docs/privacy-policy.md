@@ -1,6 +1,6 @@
 # AlignRead 隐私政策
 
-更新日期为 2026 年 11 月 17 日。本政策适用于 AlignRead（对阅）Chrome 扩展 0.1.6 的双栏翻译、选词翻译及翻译服务设置。扩展没有自营翻译服务器、用户账户、广告或遥测。
+更新日期为 2026 年 11 月 18 日。本政策适用于 AlignRead（对阅）Chrome 扩展 0.1.7 的双栏翻译、选词翻译及翻译服务设置。扩展没有自营翻译服务器、用户账户、广告或遥测。
 
 ## 扩展读取什么
 
@@ -14,7 +14,7 @@
 
 - **Google Cloud Translation Basic**（ translation.googleapis.com ）接收你的 Google API 密钥。 [Google Cloud Translation 数据使用说明](https://docs.cloud.google.com/translate/data-usage)
 - **有道智云**（ openapi.youdao.com ）接收应用 ID、请求签名和签名所需的请求时间与随机值。应用密钥留在本机生成签名。 [有道智云隐私政策](https://ai.youdao.com/DOCSIRMA/html/agreement/privacy/ydyszc/index.html)
-- **DeepSeek**（ api.deepseek.com ）、**MiniMax**（中国站 api.minimax.cn 或国际站 api.minimax.io ）和**自定义 AI 翻译**（你配置的 HTTPS Chat Completions 接口）还会接收模型名称、用于匹配译文的临时序号，以及对应的 API 密钥。 [DeepSeek 开放平台隐私政策](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-privacy-policy.html) · [MiniMax 中国站隐私政策](https://design.minimax.cn/protocol/privacy-policy) · [MiniMax 国际站隐私政策](https://platform.minimax.io/protocol/privacy-policy)
+- **ChatGPT（OpenAI）**（api.openai.com）、**Gemini**（generativelanguage.googleapis.com）、**Grok**（api.x.ai）、**GLM**（open.bigmodel.cn）、**Kimi**（api.moonshot.cn）、**豆包**（ark.cn-beijing.volces.com）、**腾讯混元**（tokenhub.tencentmaas.com）、**DeepSeek**（api.deepseek.com）、**MiniMax**（中国站 api.minimax.cn 或国际站 api.minimax.io）和**自定义 AI 翻译**（你配置的 HTTPS 接口）还会接收模型名称、用于匹配译文的临时序号，以及对应的 API 密钥。 [DeepSeek 开放平台隐私政策](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-privacy-policy.html) · [MiniMax 中国站隐私政策](https://design.minimax.cn/protocol/privacy-policy) · [MiniMax 国际站隐私政策](https://platform.minimax.io/protocol/privacy-policy)
 
 第三方收到的数据由相应运营方依其条款和隐私政策处理。自定义 AI 翻译适用你所填接口的运营方条款。翻译服务的额度和计费由该服务运营方管理。
 

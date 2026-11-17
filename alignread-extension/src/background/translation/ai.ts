@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
-import { AI_PROVIDERS, type AiCredentials, type AiProviderId } from '../../shared/ai-settings';
+import type { AiCredentials, AiProviderId } from '../../shared/ai-settings';
 import { LANGUAGES, failure, isRecord, success, type TranslationItem } from '../../shared/reader-messages';
-import { MINIMAX_IDLE_TIMEOUT_MS, MINIMAX_RESPONSE_TIMEOUT_MS, miniMaxError, readMiniMaxStream } from './minimax-stream';
+import { aiStrategy } from './ai-strategies';
 import type { TranslationBatch, TranslationProvider } from './provider';
 
 const instructions = [
@@ -14,19 +14,20 @@ const instructions = [
 
 export const ai: TranslationProvider<AiCredentials & { provider: AiProviderId }> = {
   async translateSegments(request, { endpoint, model, apiKey, provider }, signal) {
-    const streaming = provider === 'minimax';
-    const timeout = AbortSignal.timeout(streaming ? MINIMAX_RESPONSE_TIMEOUT_MS : 25_000);
-    const idle = streaming ? new AbortController() : undefined;
+    const strategy = aiStrategy(provider);
+    const stream = strategy.stream;
+    const timeout = AbortSignal.timeout(strategy.timeout);
+    const idle = stream ? new AbortController() : undefined;
     const requestSignal = AbortSignal.any(idle ? [signal, timeout, idle.signal] : [signal, timeout]);
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let receivedHeaders = false;
     const resetIdleTimer = () => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => idle?.abort(), MINIMAX_IDLE_TIMEOUT_MS);
+      if (stream) idleTimer = setTimeout(() => idle?.abort(), stream.idleTimeout);
     };
-    if (streaming) resetIdleTimer();
+    if (stream) resetIdleTimer();
     // Keep Chrome's worker active while the stream is being read.
-    const keepAlive = streaming ? setInterval(() => {
+    const keepAlive = stream ? setInterval(() => {
       void browser.runtime.getPlatformInfo().catch(() => undefined);
     }, 20_000) : undefined;
     const input = {
@@ -39,7 +40,7 @@ export const ai: TranslationProvider<AiCredentials & { provider: AiProviderId }>
         method: 'POST', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         signal: requestSignal,
-        body: JSON.stringify({ model, stream: streaming, ...requestOptions(provider, model), messages: [
+        body: JSON.stringify({ model, stream: Boolean(stream), ...strategy.options?.(model), messages: [
           { role: 'system', content: instructions },
           { role: 'user', content: JSON.stringify(input) },
         ] }),
@@ -50,11 +51,11 @@ export const ai: TranslationProvider<AiCredentials & { provider: AiProviderId }>
       if (response.status === 404) return failure('ai-endpoint');
       if (response.status === 429) return failure('rate-limit');
       if (!response.ok) return failure('provider-error');
-      if (streaming) resetIdleTimer();
-      const isEventStream = streaming && response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream');
-      const data: unknown = isEventStream ? await readMiniMaxStream(response, resetIdleTimer) : JSON.parse(await response.text());
+      if (stream) resetIdleTimer();
+      const data: unknown = stream && response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream')
+        ? await stream.read(response, resetIdleTimer) : await response.json();
       requestSignal.throwIfAborted();
-      const error = streaming ? miniMaxError(data) : undefined;
+      const error = stream?.error?.(data);
       return error ? failure(error) : readBatch(request, data);
     } catch (error) {
       if (signal.aborted) return failure('stale');
@@ -67,14 +68,6 @@ export const ai: TranslationProvider<AiCredentials & { provider: AiProviderId }>
     }
   },
 };
-
-function requestOptions(provider: AiProviderId, model: string) {
-  if (provider === 'deepseek') return { response_format: { type: 'json_object' }, thinking: { type: 'disabled' } };
-  if (provider !== 'minimax') return {};
-  if (model === AI_PROVIDERS.minimax.model) return { reasoning_split: true, reasoning_effort: 'low' };
-  if (model === 'MiniMax-M3') return { reasoning_split: true, thinking: { type: 'disabled' } };
-  return { reasoning_split: true };
-}
 
 function readBatch(request: TranslationBatch, response: unknown) {
   const choice: unknown = isRecord(response) && Array.isArray(response.choices) ? response.choices[0] : undefined;

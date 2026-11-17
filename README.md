@@ -11,12 +11,7 @@ AlignRead 是 Chrome 桌面扩展。左栏保留可交互的原网页，右栏�
 
 ## 配置翻译和开始使用
 
-1. 点击 AlignRead 图标，再点击「设置」打开完整设置页。在「配置服务」下拉框选择服务，填写下方表单。保存并授权后，点击「设为当前服务」启用所选服务。
-   - **有道智云**。在有道控制台开通「批量文本翻译（NMT）」，填写应用 ID 和应用密钥，勾选外发授权，点击「保存有道设置」并允许访问 `openapi.youdao.com`。已保存凭据时，可留空并直接保存授权。 [有道智云批量翻译文档](https://ai.youdao.com/DOCSIRMA/html/trans/api/plwbfy/index.html)
-   - **Google Cloud Translation Basic**。在 Google Cloud 项目开启计费并启用 Cloud Translation API，创建仅允许调用该 API 的密钥。在扩展里填写密钥，勾选外发授权，点击「保存 Google 设置」并允许访问 `translation.googleapis.com`。 [Google Cloud Translation 设置](https://docs.cloud.google.com/translate/docs/setup)
-   - **AI 翻译**。填写兼容 OpenAI Chat Completions 的完整 HTTPS 地址（如 `https://api.example.com/v1/chat/completions`）、模型名称和 API 密钥。勾选文本外发授权，点击「保存 AI 设置」并允许访问配置的域名，然后点击「测试连接」。更换接口地址时需要重新填写密钥。 [兼容接口示例](https://docs.vllm.ai/en/latest/serving/openai_compatible_server/)
-   - **DeepSeek**。使用官方接口，默认模型为 `deepseek-flash`。填写自己的 DeepSeek API 密钥，勾选外发授权，保存后允许访问 `api.deepseek.com`，再测试连接。 [DeepSeek API 文档](https://api-docs.deepseek.com/)
-   - **MiniMax**。按密钥所属平台选择中国站或国际站，默认模型为 `MiniMax-M3.1-Flash`。填写对应站点的 API 密钥，勾选外发授权，保存后允许访问该站点的 API 域名，再测试连接。 [中国站文档](https://platform.minimax.cn/docs/api-reference/text-openai-api) · [国际站文档](https://platform.minimax.io/docs/api-reference/text-openai-api)
+1. 点击 AlignRead 图标，再点击「设置」。在「配置服务」中选择服务，保存凭据并授权后，点击「设为当前服务」。支持 ChatGPT（OpenAI）、Gemini、Grok、GLM、Kimi、豆包、腾讯混元、DeepSeek、MiniMax、自定义 AI、有道智云和 Google Cloud Translation。 [各服务配置与默认模型](docs/translation-services.md)
 2. 打开普通文章或技术文档，选择原文、译文语言以及「整页可见文字」或「仅正文」，点击「开启双栏」。默认自动检测原文语言、译为简体中文。
 3. 译文分批到达。直接点击译文文字，左栏会滚动并高亮对应原文段落。用 Tab 聚焦译文段落后，按 Enter 也可定位。点击原文普通文字可反向定位，链接和文本选区保留各自的操作。
 4. 拖动分隔条或聚焦后按左右方向键调整宽度。同步滚动和悬停高亮默认开启，可在右栏切换。翻译可暂停、继续或重试失败段落。
