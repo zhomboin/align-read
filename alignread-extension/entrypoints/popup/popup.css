@@ -1,15 +1,28 @@
+:root {
+  --surface: #fff;
+  --surface-raised: #fff;
+  --surface-inset: #fff;
+  --ink: #212529;
+  --muted: #53585d;
+  --field-line: #8b9196;
+  --edge: #e0e2e4;
+  --light: #fff;
+  --shadow: #e2e4e6;
+  --inset: inset 1px 1px 4px #e9eaec;
+}
+
 body {
-  inline-size: 400px;
-  max-inline-size: 100vw;
+  inline-size: 440px;
   font-size: 14px;
 }
 
-main { padding: clamp(13px, 4.5vw, 20px); }
+main { padding: 20px; }
 header, .brand { display: flex; align-items: center; gap: 10px; }
 header { justify-content: space-between; }
 .brand img { flex: none; border-radius: 7px; }
 h1 { font-size: 22px; line-height: 1.2; }
-header button { min-block-size: 36px; padding: 6px 12px; }
+header button { flex: none; min-block-size: 36px; padding: 6px 12px; white-space: nowrap; }
+button:not(.primary):hover:not(:disabled) { background: #f4f5f6; }
 
 .provider-name { margin-block: 12px 5px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .language-fields { margin-block: 14px; gap: 10px; }
