@@ -1,4 +1,5 @@
 import { defineConfig } from 'wxt';
+import { AI_HOST_PERMISSION } from './src/shared/ai-settings';
 import { TRANSLATION_PROVIDERS } from './src/shared/reader-messages';
 
 export default defineConfig({
@@ -13,7 +14,7 @@ export default defineConfig({
       128: 'icons/128.png',
     },
     permissions: ['activeTab', 'scripting', 'storage'],
-    optional_host_permissions: Object.values(TRANSLATION_PROVIDERS).map(({ origin }) => origin),
+    optional_host_permissions: [TRANSLATION_PROVIDERS.google.origin, TRANSLATION_PROVIDERS.youdao.origin, AI_HOST_PERMISSION],
     minimum_chrome_version: '116',
   },
 });

@@ -7,6 +7,7 @@ const {spawn} = require('node:child_process');
 const {setTimeout: wait} = require('node:timers/promises');
 const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
 const {checkSettings} = require('./settings-check.cjs');
+const {aiResponse, checkAiWorker} = require('./ai-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
@@ -15,7 +16,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), '
 assert.equal(manifest.manifest_version, 3);
 assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
 assert.deepEqual(manifest.optional_host_permissions,
-  ['https://translation.googleapis.com/*', 'https://openapi.youdao.com/*']);
+  ['https://translation.googleapis.com/*', 'https://openapi.youdao.com/*', 'https://*/*']);
+assert.equal(manifest.host_permissions, undefined);
 assert.equal(manifest.content_scripts, undefined);
 assert.deepEqual(manifest.options_ui, {open_in_tab: true, page: 'options.html'});
 const googleOrigin = 'https://translation.googleapis.com/*';
@@ -39,9 +41,14 @@ const storage = (data) => ({
   async remove(key) { delete data[key]; },
 });
 let listener;
+let permissionRemoved;
 let response = 'success';
 let blocked;
 let permitted = false;
+const setResponse = (value) => { response = value; };
+function revokePermission(host) {
+  if (grants.delete(host)) permissionRemoved({origins: [host]});
+}
 function startWorker() {
   const chrome = {
     runtime: {
@@ -82,8 +89,8 @@ function startWorker() {
     },
     permissions: {
       async contains({origins}) { return origins.every((host) => grants.has(host)); },
-      async remove({origins}) { for (const host of origins) grants.delete(host); },
-      onRemoved: noopEvent,
+      async remove({origins}) { for (const host of origins) revokePermission(host); },
+      onRemoved: {addListener(handler) { permissionRemoved = handler; }},
     },
     scripting: {
       async executeScript({target, files}) {
@@ -102,6 +109,7 @@ function startWorker() {
     async fetch(url, options) {
       calls.push({url, options});
       if (blocked) await blocked.promise;
+      if (url.endsWith('/chat/completions')) return aiResponse(options, response);
       if (url.includes('youdao.com')) {
         const q = options.body.get('q');
         if (q === 'Pending before navigation') {
@@ -366,8 +374,8 @@ async function checkOptions() {
       await checkSelectionPage({page, evaluate, until, build, initReader});
     }
     if (selectionOnly) return;
-    await checkSettings({page, evaluate, until, manifest, request, local,
-      setPermission: (value) => { permitted = value; }, setResponse: (value) => { response = value; }});
+    await checkSettings({page, evaluate, until, manifest, request, local, grants,
+      setPermission: (value) => { permitted = value; }, setResponse});
     if (settingsOnly) return;
 
     await page('Page.navigate', {url: 'about:blank'});
@@ -919,6 +927,7 @@ function initBrowser(version, tabId) {
 async function run() {
   if (selectionOnly || settingsOnly) startWorker();
   else await checkWorker();
+  if (!selectionOnly) await checkAiWorker({request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission});
   if (!settingsOnly) await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
   await checkOptions();
 }

@@ -1,16 +1,20 @@
 import { browser } from 'wxt/browser';
+import { aiHostPermission, parseAiKey, parseAiSettings, type AiCredentials } from '../../shared/ai-settings';
 import {
   MAX_YOUDAO_CREDENTIAL_LENGTH, TRANSLATION_PROVIDERS, clampRatio, defaults, errors, isProviderId, isReadingOptions, isRecord,
   type ErrorCode, type Preferences, type ProviderCheck, type ProviderId, type PublicSettings, type YoudaoCredentials,
 } from '../../shared/reader-messages.ts';
 
 const KEY = 'providerSettings';
+const providerIds = Object.keys(TRANSLATION_PROVIDERS) as ProviderId[];
 export type Settings = Preferences & {
   provider: ProviderId;
   key: string;
   revision: string;
   youdao: YoudaoCredentials | null;
   youdaoAuthorized: boolean;
+  ai: AiCredentials | null;
+  aiAuthorized: boolean;
   checks: Partial<Record<ProviderId, ProviderCheck | null>>;
 };
 let initialization: Promise<void> | undefined;
@@ -23,42 +27,81 @@ export async function getSettings(): Promise<Settings> {
   const { [KEY]: stored } = await browser.storage.local.get(KEY);
   const saved = isRecord(stored) ? stored : {};
   const checks = isRecord(saved.checks) ? saved.checks : {};
+  const aiSettings = isRecord(saved.ai) ? parseAiSettings(saved.ai) : null;
+  const aiKey = isRecord(saved.ai) ? parseAiKey(saved.ai.apiKey) : null;
   return { ...normalize(saved),
     provider: isProviderId(saved.provider) ? saved.provider : 'google',
     key: typeof saved.key === 'string' ? saved.key : '',
     revision: typeof saved.revision === 'string' ? saved.revision : '',
     youdao: parseYoudaoCredentials(saved.youdao),
     youdaoAuthorized: saved.youdaoAuthorized === true,
-    checks: { google: parseCheck(checks.google), youdao: parseCheck(checks.youdao) },
+    ai: aiSettings && aiKey ? { ...aiSettings, apiKey: aiKey } : null,
+    aiAuthorized: saved.aiAuthorized === true && Boolean(aiSettings && aiKey),
+    checks: { google: parseCheck(checks.google), youdao: parseCheck(checks.youdao), ai: parseCheck(checks.ai) },
   };
 }
 
 export async function publicSettings(settings: Settings): Promise<PublicSettings> {
-  const { key, revision: _, youdao, checks, authorized, youdaoAuthorized, ...preferences } = settings;
-  const [googlePermission, youdaoPermission] = await Promise.all([
-    hasHostPermission('google'), hasHostPermission('youdao'),
+  const { key, revision: _, youdao, ai, checks, authorized, youdaoAuthorized, aiAuthorized, ...preferences } = settings;
+  const [googlePermission, youdaoPermission, aiPermission] = await Promise.all([
+    hasHostPermission(settings, 'google'), hasHostPermission(settings, 'youdao'), hasHostPermission(settings, 'ai'),
   ]);
-  return { ...preferences, providers: {
+  return { ...preferences, ai: ai ? { endpoint: ai.endpoint, model: ai.model } : null, providers: {
     google: { configured: Boolean(key), consent: authorized, hostPermission: googlePermission,
       lastCheck: key ? checks.google ?? null : null },
     youdao: { configured: youdao !== null, consent: youdaoAuthorized, hostPermission: youdaoPermission,
       lastCheck: youdao ? checks.youdao ?? null : null,
       appKeySuffix: youdao && youdao.appKey.length > 4 ? youdao.appKey.slice(-4) : undefined },
+    ai: { configured: ai !== null, consent: aiAuthorized, hostPermission: aiPermission,
+      lastCheck: ai ? checks.ai ?? null : null },
   } };
 }
 
 export async function hasProviderPermission(settings: Settings, provider: ProviderId) {
-  const consent = provider === 'youdao' ? settings.youdaoAuthorized : settings.authorized;
-  return consent && await hasHostPermission(provider);
+  return providerConsent(settings, provider) && await hasHostPermission(settings, provider);
 }
 
-function hasHostPermission(provider: ProviderId) {
-  return browser.permissions.contains({ origins: [TRANSLATION_PROVIDERS[provider].origin] });
+export function providerConsent(settings: Settings, provider: ProviderId) {
+  switch (provider) {
+    case 'google': return settings.authorized;
+    case 'youdao': return settings.youdaoAuthorized;
+    case 'ai': return settings.aiAuthorized;
+  }
+}
+
+export function providerOrigin(settings: Settings, provider: ProviderId) {
+  if (provider !== 'ai') return TRANSLATION_PROVIDERS[provider].origin;
+  return settings.ai ? aiHostPermission(settings.ai.endpoint) : undefined;
+}
+
+async function hasHostPermission(settings: Settings, provider: ProviderId) {
+  const origin = providerOrigin(settings, provider);
+  return Boolean(origin && await browser.permissions.contains({ origins: [origin] }));
+}
+
+export async function removeUnusedProviderPermissions(origins: (string | undefined)[]) {
+  const settings = await getSettings();
+  const inUse = new Set(providerIds.filter((provider) => providerConsent(settings, provider))
+    .map((provider) => providerOrigin(settings, provider)));
+  const unused = [...new Set(origins)].filter((origin): origin is string => Boolean(origin && !inUse.has(origin)));
+  if (unused.length) await browser.permissions.remove({ origins: unused });
+}
+
+export function isConfigured(settings: Settings, provider: ProviderId) {
+  switch (provider) {
+    case 'google': return Boolean(settings.key);
+    case 'youdao': return Boolean(settings.youdao);
+    case 'ai': return Boolean(settings.ai);
+  }
 }
 
 export function sameCredentials(provider: ProviderId, first: Settings, second: Settings) {
-  return provider === 'google' ? first.key === second.key :
-    first.youdao?.appKey === second.youdao?.appKey && first.youdao?.appSecret === second.youdao?.appSecret;
+  switch (provider) {
+    case 'google': return first.key === second.key;
+    case 'youdao': return first.youdao?.appKey === second.youdao?.appKey && first.youdao?.appSecret === second.youdao?.appSecret;
+    case 'ai': return first.ai?.endpoint === second.ai?.endpoint && first.ai?.model === second.ai?.model &&
+      first.ai?.apiKey === second.ai?.apiKey;
+  }
 }
 
 function parseCheck(value: unknown): ProviderCheck | null {
