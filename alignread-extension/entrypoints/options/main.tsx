@@ -17,11 +17,6 @@ const emptyYoudaoCredentials: YoudaoCredentials = { appKey: '', appSecret: '' };
 const emptyStatus: ProviderStatus = { configured: false, consent: false, hostPermission: false, lastCheck: null };
 const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', sites: '站点与缓存' } as const;
 const categories = ['translation', 'reading', 'sites'] as const;
-const editors: { id: ProviderId; label: string }[] = [
-  { id: 'google', label: 'Google Cloud' }, { id: 'youdao', label: '有道智云' },
-  { id: 'ai', label: AI_PROVIDERS.ai.label }, { id: 'deepseek', label: AI_PROVIDERS.deepseek.label },
-  { id: 'minimax', label: AI_PROVIDERS.minimax.label },
-];
 type Category = typeof categories[number];
 type PreferenceCategory = Exclude<Category, 'translation'>;
 type ReadingPreferences = ReadingOptions & Pick<PublicSettings, 'ratio' | 'syncScroll' | 'highlight'>;
@@ -286,21 +281,21 @@ function Options() {
     <main>
       <h2 className="page-title">{categoryLabels[category]}</h2>
       {loadError && <p className="feedback" role="status">{loadError}</p>}
-      {category === 'translation' && <>
-        <section className="panel provider-select">
-          <label className="field" htmlFor="active-provider">当前翻译服务</label>
-          <select id="active-provider" value={settings.provider} disabled={busy} onChange={(event) => {
-            const provider = event.target.value;
-            if (isProviderId(provider)) void selectProvider(provider);
-          }}>
-            {Object.entries(TRANSLATION_PROVIDERS).map(([id, { label }]) => <option key={id} value={id}>{label}</option>)}
-          </select>
-          {providerMessage && <p className="feedback" role="status">{providerMessage}</p>}
-        </section>
+      {category === 'translation' && (
         <section className="panel" aria-label="翻译服务配置">
-          <div className="provider-switch" role="group" aria-label="选择要配置的服务">
-            {editors.map(({ id, label }) => <button key={id} type="button" aria-pressed={visibleEditor === id}
-              onClick={() => setEditor(id)}>{label}</button>)}
+          <div className="provider-select">
+            <label className="field">配置服务
+              <select id="provider-editor" value={visibleEditor} disabled={busy} onChange={(event) => {
+                const provider = event.target.value;
+                if (isProviderId(provider)) setEditor(provider);
+              }}>
+                {Object.entries(TRANSLATION_PROVIDERS).map(([id, { label }]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </label>
+            <button className="set-current-provider" type="button" disabled={busy || visibleEditor === settings.provider}
+              onClick={() => void selectProvider(visibleEditor)}>设为当前服务</button>
+            <p className="hint provider-current" role="status">当前翻译服务 · {TRANSLATION_PROVIDERS[settings.provider].label}</p>
+            {providerMessage && <p className="feedback" role="status">{providerMessage}</p>}
           </div>
           <div className="provider-layout">
             {aiEditor && aiConfig ? <AiProviderForm key={aiEditor} provider={aiEditor} draft={aiConfig} saved={savedAi}
@@ -363,7 +358,7 @@ function Options() {
             </section>
           </div>
         </section>
-      </>}
+      )}
       {category === 'reading' && <form className="preference-form" onSubmit={(event) => void save(event, 'reading')}>
         <section className="panel">
           <h3>语言与范围</h3>

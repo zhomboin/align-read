@@ -159,7 +159,8 @@ async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, s
       assert.equal(body.response_format, undefined);
     }
 
-    await request({type: 'select-provider', provider});
+    const switched = await request({type: 'switch-provider', tabId, provider}, 'popup');
+    assert.equal(switched.value.settings.provider, provider);
     assert((await request({type: 'selection-start', tabId, provider, options: {
       source: 'en', target: 'zh-CN', range: 'main',
     }}, 'popup')).ok);

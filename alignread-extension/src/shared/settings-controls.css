@@ -1,18 +1,19 @@
 :root {
   color-scheme: light;
-  --surface: #e8efeb;
-  --surface-raised: #edf3ef;
-  --surface-inset: #e3ebe6;
-  --ink: #1c332a;
-  --muted: #496157;
+  --surface: #fff;
+  --surface-raised: #fff;
+  --surface-inset: #fff;
+  --surface-hover: #f4f5f6;
+  --ink: #212529;
+  --muted: #53585d;
   --accent: #27604c;
   --focus: #1b6e55;
-  --field-line: #7b9387;
-  --edge: #d0ded6;
-  --light: #fafffc;
-  --shadow: #c5d4cd;
+  --field-line: #8b9196;
+  --edge: #e0e2e4;
+  --light: #fff;
+  --shadow: #e2e4e6;
   --raised: 5px 5px 12px var(--shadow), -5px -5px 12px var(--light);
-  --inset: inset 2px 2px 5px #cbd9d1, inset -2px -2px 5px var(--light);
+  --inset: inset 1px 1px 4px #e9eaec;
   --danger: #793e36;
 }
 
@@ -53,7 +54,7 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) { background: #dce8e0; }
+button:hover:not(:disabled) { background: var(--surface-hover); }
 button:active:not(:disabled) { box-shadow: var(--inset); }
 button:disabled { opacity: .57; box-shadow: none; cursor: default; }
 

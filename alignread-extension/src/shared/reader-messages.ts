@@ -102,6 +102,7 @@ export type BatchResult = { id: string; items: TranslationItem[] };
 
 export type PopupMessage =
   | { type: 'page'; tabId: number }
+  | { type: 'switch-provider'; tabId: number; provider: ProviderId }
   | { type: 'start' | 'selection-start'; tabId: number; provider: ProviderId; options: ReadingOptions; confirmSensitive: boolean }
   | { type: 'selection-stop'; tabId: number }
   | { type: 'control'; tabId: number; command: 'pause' | 'resume' | 'stop' };

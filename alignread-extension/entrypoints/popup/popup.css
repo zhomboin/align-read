@@ -1,17 +1,16 @@
 body {
-  inline-size: 400px;
-  max-inline-size: 100vw;
+  inline-size: 440px;
   font-size: 14px;
 }
 
-main { padding: clamp(13px, 4.5vw, 20px); }
+main { padding: 20px; }
 header, .brand { display: flex; align-items: center; gap: 10px; }
 header { justify-content: space-between; }
 .brand img { flex: none; border-radius: 7px; }
 h1 { font-size: 22px; line-height: 1.2; }
-header button { min-block-size: 36px; padding: 6px 12px; }
+header button { flex: none; min-block-size: 36px; padding: 6px 12px; white-space: nowrap; }
 
-.provider-name { margin-block: 12px 5px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.provider-field { margin-block-start: 14px; }
 .language-fields { margin-block: 14px; gap: 10px; }
 .sensitive { margin-block: 12px; color: #744822; }
 
