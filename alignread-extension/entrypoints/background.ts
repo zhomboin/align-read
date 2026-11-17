@@ -1,13 +1,15 @@
 import { browser } from 'wxt/browser';
 import {
-  getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, publicSettings, sameCredentials,
-  updateSettings, type Settings,
+  getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, providerConsent,
+  providerOrigin, publicSettings, removeUnusedProviderPermissions, sameCredentials, updateSettings, type Settings,
 } from '../src/background/settings/settings';
+import { ai } from '../src/background/translation/ai';
 import { google } from '../src/background/translation/google';
 import type { TranslationBatch } from '../src/background/translation/provider';
 import { youdao } from '../src/background/translation/youdao';
+import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
 import {
-  LIMITS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
+  LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
   isSensitive, isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
@@ -51,11 +53,16 @@ export default defineBackground(() => {
   });
   browser.permissions.onRemoved.addListener(({ origins }) => {
     if (origins?.length) {
-      void stopSessions(({ provider }) => origins.includes(TRANSLATION_PROVIDERS[provider ?? 'google'].origin))
-        .catch(() => undefined);
+      void stopAfterPermissionRemoval().catch(() => undefined);
     }
   });
 });
+
+async function stopAfterPermissionRemoval() {
+  const settings = await getSettings();
+  if (await hasProviderPermission(settings, settings.provider)) return;
+  await stopSessions((grant) => grant.revision === settings.revision);
+}
 
 function onTab<T>(tabId: number, action: () => Promise<T>): Promise<T> {
   const result = (tabCommands.get(tabId) ?? Promise.resolve()).then(action);
@@ -104,15 +111,12 @@ async function updateProviderSettings(update: (current: Settings) => Settings) {
   const saved = await updateSettings((current) => {
     const next = update(current);
     if (next === current) return current;
-    const sameGoogleKey = sameCredentials('google', current, next);
-    const sameYoudaoKey = sameCredentials('youdao', current, next);
-    next.checks = {
-      google: sameGoogleKey ? current.checks.google : null,
-      youdao: sameYoudaoKey ? current.checks.youdao : null,
-    };
-    const accessChanged = current.provider === 'google'
-      ? !sameGoogleKey || next.authorized !== current.authorized
-      : !sameYoudaoKey || next.youdaoAuthorized !== current.youdaoAuthorized;
+    next.checks = { ...current.checks };
+    for (const provider of PROVIDER_IDS) {
+      if (!sameCredentials(provider, current, next)) next.checks[provider] = null;
+    }
+    const accessChanged = !sameCredentials(current.provider, current, next) ||
+      providerConsent(current, current.provider) !== providerConsent(next, current.provider);
     if (next.provider === current.provider && !accessChanged) return next;
     previousRevision = current.revision;
     return { ...next, revision: crypto.randomUUID() };
@@ -155,7 +159,7 @@ async function options(message: OptionsMessage) {
         const key = message.key?.trim() ?? current.key;
         return { ...current, key, authorized: Boolean(key) && message.authorized };
       });
-      if (!settings.authorized) await browser.permissions.remove({ origins: [TRANSLATION_PROVIDERS.google.origin] });
+      if (!settings.authorized) await removeUnusedProviderPermissions([TRANSLATION_PROVIDERS.google.origin]);
       return success(await publicSettings(settings));
     }
     case 'save-youdao': {
@@ -167,7 +171,32 @@ async function options(message: OptionsMessage) {
         const youdao = message.credentials === undefined ? current.youdao : credentials;
         return { ...current, youdao, youdaoAuthorized: Boolean(youdao) && message.authorized };
       });
-      if (!settings.youdaoAuthorized) await browser.permissions.remove({ origins: [TRANSLATION_PROVIDERS.youdao.origin] });
+      if (!settings.youdaoAuthorized) await removeUnusedProviderPermissions([TRANSLATION_PROVIDERS.youdao.origin]);
+      return success(await publicSettings(settings));
+    }
+    case 'save-ai': {
+      const { config, authorized, provider } = message;
+      if (!isAiProviderId(provider)) return failure('ai-config');
+      const fields = isRecord(config) ? parseAiSettings(provider, config) : null;
+      const key = isRecord(config) ? parseAiKey(config.apiKey) : null;
+      if (typeof authorized !== 'boolean' || (config !== null && (!fields ||
+          (config.apiKey !== undefined && !key)))) return failure('ai-config');
+
+      let oldOrigin: string | undefined;
+      let missingKey = false;
+      const settings = await updateProviderSettings((current) => {
+        const previous = current.aiServices[provider];
+        const apiKey = key ?? (previous?.endpoint === fields?.endpoint ? previous?.apiKey : undefined);
+        if (fields && !apiKey) {
+          missingKey = true;
+          return current;
+        }
+        oldOrigin = providerOrigin(current, provider);
+        const service = fields && apiKey ? { ...fields, apiKey, authorized } : null;
+        return { ...current, aiServices: { ...current.aiServices, [provider]: service } };
+      });
+      if (missingKey) return failure('ai-config');
+      await removeUnusedProviderPermissions([oldOrigin]);
       return success(await publicSettings(settings));
     }
     case 'select-provider': {
@@ -187,12 +216,16 @@ async function options(message: OptionsMessage) {
       await clearCaches();
       return success(null);
     case 'reset': {
-      const settings = await updateSettings(() => ({
-        ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
-        checks: {},
-      }));
+      let origins: (string | undefined)[] = [];
+      const settings = await updateSettings((current) => {
+        origins = PROVIDER_IDS.map((provider) => providerOrigin(current, provider));
+        return {
+          ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
+          aiServices: { ...EMPTY_AI_SERVICES }, checks: {},
+        };
+      });
       await stopSessions(() => true);
-      await browser.permissions.remove({ origins: Object.values(TRANSLATION_PROVIDERS).map(({ origin }) => origin) });
+      await removeUnusedProviderPermissions(origins);
       return success(await publicSettings(settings));
     }
     default:
@@ -206,7 +239,7 @@ async function testProvider(provider: ProviderId) {
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
 
   const item = { id: 'connection-test', text: 'Hello, world!' };
-  const signal = AbortSignal.timeout(22_000);
+  const signal = AbortSignal.timeout(isAiProviderId(provider) ? 28_000 : 22_000);
   const result = await translateWithProvider(provider, settings, {
     id: item.id, items: [item], source: 'en', target: 'zh-CN', range: 'visible',
   }, signal);
@@ -415,14 +448,18 @@ async function translate(tabId: number, kind: SessionKind, grant: Grant, message
     id: message.batchId, items: message.items,
   };
   const result = await translateWithProvider(provider, settings, request, signal);
-  return signal.aborted ? failure('stale') : result;
+  return signal.aborted || (await getSettings()).revision !== grant.revision ? failure('stale') : result;
 }
 
 function translateWithProvider(provider: ProviderId, settings: Settings, request: TranslationBatch, signal: AbortSignal) {
-  if (provider === 'youdao') {
-    return settings.youdao ? youdao.translateSegments(request, settings.youdao, signal) : failure('not-configured');
+  switch (provider) {
+    case 'google': return settings.key ? google.translateSegments(request, settings.key, signal) : failure('not-configured');
+    case 'youdao': return settings.youdao ? youdao.translateSegments(request, settings.youdao, signal) : failure('not-configured');
+    default: {
+      const service = settings.aiServices[provider];
+      return service ? ai.translateSegments(request, { ...service, provider }, signal) : failure('not-configured');
+    }
   }
-  return settings.key ? google.translateSegments(request, settings.key, signal) : failure('not-configured');
 }
 
 function validItems(items: unknown): items is TranslationItem[] {

@@ -5,10 +5,10 @@
 ## 网页内容和翻译请求
 
 - 双栏在用户主动开启后读取当前标签页所选范围内的可见文字。选词翻译需在当前标签页开启，只在用户点击「译」或重试时发送选中文字。两种操作都跳过表单、密码、可编辑区域和隐藏内容。检测到登录、支付、管理后台等可能含有敏感内容的页面时，扩展会要求用户再确认一次。
-- 启动翻译前需要保存服务凭据、同意发送文本并授予服务域名的访问权限。扩展经 HTTPS 向所选服务发送待译文本、语言参数和该服务所需的身份验证信息。Google Cloud Translation Basic 使用用户填写的 API 密钥。有道智云接收应用 ID 和请求签名，应用密钥留在本机生成签名。请求不附带网页地址、网页 Cookie、DOM 或表单值。可见文本本身仍可能包含个人资料。
+- 启动翻译前需要保存服务凭据、同意发送文本并授予服务域名的访问权限。扩展经 HTTPS 向所选服务发送待译文本、语言参数和该服务所需的身份验证信息。Google Cloud Translation Basic 使用用户填写的 API 密钥。有道智云接收应用 ID 和请求签名，应用密钥留在本机生成签名。DeepSeek、MiniMax 和自定义 AI 翻译会将待译片段、语言、临时序号、模型名称及对应的 API 密钥发送到该服务的接口。请求不附带网页地址、网页 Cookie、DOM 或表单值。可见文本本身仍可能包含个人资料。
 - 标题、链接文字、列表、表格和图注等可见文字可能进入所选范围。右栏布局、段落定位和高亮在浏览器本地处理，图片以本地占位显示。
 - 「测试连接」使用已保存的凭据发送固定示例文本。连接测试记录保存在本机，仅包含测试时间与结果。
-- 使用服务所产生的第三方数据处理和计费由服务提供商管理。参见 [Google Cloud Translation 数据使用说明](https://docs.cloud.google.com/translate/data-usage) 和 [有道智云隐私政策](https://ai.youdao.com/DOCSIRMA/html/agreement/privacy/ydyszc/index.html)。
+- 使用服务所产生的数据处理和计费由相应的服务运营方管理。AI 服务适用用户选定接口的数据处理及计费条款。 [Google Cloud Translation 数据使用说明](https://docs.cloud.google.com/translate/data-usage) · [有道智云隐私政策](https://ai.youdao.com/DOCSIRMA/html/agreement/privacy/ydyszc/index.html)
 
 ## 本地保存和删除
 
@@ -24,6 +24,7 @@
 | `scripting` | 按需挂载双栏或选词界面、读取相应范围内的文字 |
 | `storage` | 保存本机配置和当前浏览器会话的任务授权 |
 | `translation.googleapis.com`、`openapi.youdao.com` | 分别按需请求，用于调用用户授权的 Google Cloud 或有道智云服务 |
+| 可选 HTTPS 域名 | 用户配置并同意使用 AI 服务时，仅申请对应主机。DeepSeek 使用 `api.deepseek.com`，MiniMax 使用所选站点的 `api.minimax.cn` 或 `api.minimax.io`，自定义 AI 使用用户填写的主机 |
 
 ## 数据用途与联系
 

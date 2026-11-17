@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
+import { AI_PROVIDERS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, parseAiKey, parseAiSettings,
+  type AiProviderId } from '../../src/shared/ai-settings';
 import { request } from '../../src/shared/extension';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
   LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
   type ProviderId, type ProviderStatus, type PublicSettings, type ReadingOptions, type YoudaoCredentials,
 } from '../../src/shared/reader-messages';
+import { AiProviderForm, type AiDraft } from './ai-provider-form';
 import '../../src/shared/settings-controls.css';
 import './options.css';
 
@@ -50,7 +53,8 @@ function Options() {
   const [category, setCategory] = useState(currentCategory);
   const [editor, setEditor] = useState<ProviderId>();
   const [settings, setSettings] = useState<PublicSettings>({
-    ...defaults, provider: 'google', providers: { google: emptyStatus, youdao: emptyStatus },
+    ...defaults, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
+    providers: { google: emptyStatus, youdao: emptyStatus, ai: emptyStatus, deepseek: emptyStatus, minimax: emptyStatus },
   });
   const [key, setKey] = useState('');
   const [erase, setErase] = useState(false);
@@ -59,6 +63,8 @@ function Options() {
   const [youdao, setYoudao] = useState(emptyYoudaoCredentials);
   const [youdaoConsent, setYoudaoConsent] = useState(false);
   const [youdaoMessage, setYoudaoMessage] = useState('');
+  const [aiDrafts, setAiDrafts] = useState<Partial<Record<AiProviderId, AiDraft>>>({});
+  const [aiMessages, setAiMessages] = useState<Partial<Record<AiProviderId, string>>>({});
   const [providerMessage, setProviderMessage] = useState('');
   const [reading, setReading] = useState(() => readingPreferences(defaults));
   const [cache, setCache] = useState(defaults.cache);
@@ -71,6 +77,13 @@ function Options() {
   const { google, youdao: youdaoStatus } = settings.providers;
   const busy = saving || testing !== null;
   const visibleEditor = editor ?? settings.provider;
+  const aiEditor = isAiProviderId(visibleEditor) ? visibleEditor : null;
+  const savedAi = aiEditor && settings.aiServices[aiEditor];
+  const aiConfig = aiEditor && (aiDrafts[aiEditor] ?? {
+    endpoint: savedAi?.endpoint ?? AI_PROVIDERS[aiEditor].endpoint,
+    model: savedAi?.model ?? AI_PROVIDERS[aiEditor].model,
+    apiKey: '', authorized: settings.providers[aiEditor].consent,
+  });
   const googleEdited = Boolean(key.trim()) || erase || googleConsent !== google.consent;
   const youdaoEdited = Boolean(youdao.appKey.trim() || youdao.appSecret.trim()) || youdaoConsent !== youdaoStatus.consent;
 
@@ -85,10 +98,11 @@ function Options() {
     setGoogleConsent(saved.providers.google.consent);
     setYoudaoConsent(saved.providers.youdao.consent);
     setYoudao(emptyYoudaoCredentials);
+    setAiDrafts({});
   }
 
   function adoptProviders(saved: PublicSettings) {
-    setSettings((current) => ({ ...current, providers: saved.providers, provider: saved.provider }));
+    setSettings((current) => ({ ...current, providers: saved.providers, provider: saved.provider, aiServices: saved.aiServices }));
   }
 
   async function usage() {
@@ -150,8 +164,8 @@ function Options() {
     setBusy(false);
   }
 
-  function grantPermission(provider: ProviderId) {
-    return browser.permissions.request({ origins: [TRANSLATION_PROVIDERS[provider].origin] }).catch(() => false);
+  function grantPermission(origin: string) {
+    return browser.permissions.request({ origins: [origin] }).catch(() => false);
   }
 
   async function saveGoogle(event: FormEvent) {
@@ -159,7 +173,7 @@ function Options() {
     setBusy(true);
     setGoogleMessage('');
     const authorized = !erase && googleConsent && Boolean(key.trim() || google.configured);
-    if (authorized) await grantPermission('google');
+    if (authorized) await grantPermission(TRANSLATION_PROVIDERS.google.origin);
     const result = await request<PublicSettings>({ type: 'save-google', authorized, key: erase ? '' : key.trim() || undefined });
     if (result.ok) {
       adoptProviders(result.value);
@@ -182,7 +196,7 @@ function Options() {
     setBusy(true);
     setYoudaoMessage('');
     const authorized = !clear && youdaoConsent;
-    if (authorized) await grantPermission('youdao');
+    if (authorized) await grantPermission(TRANSLATION_PROVIDERS.youdao.origin);
     const credentials = clear ? null : replacing ? { appKey, appSecret } : undefined;
     const result = await request<PublicSettings>({ type: 'save-youdao', credentials, authorized });
     if (result.ok) {
@@ -194,8 +208,34 @@ function Options() {
     setBusy(false);
   }
 
+  function aiFeedback(provider: AiProviderId, message: string) {
+    setAiMessages((current) => ({ ...current, [provider]: message }));
+  }
+
+  async function saveAi(provider: AiProviderId, draft: AiDraft, clear = false) {
+    const fields = clear ? null : parseAiSettings(provider, draft);
+    const apiKey = parseAiKey(draft.apiKey);
+    if (!clear && (!fields || (!apiKey && (draft.apiKey || fields.endpoint !== settings.aiServices[provider]?.endpoint)))) {
+      aiFeedback(provider, errors['ai-config']);
+      return;
+    }
+    setBusy(true);
+    aiFeedback(provider, '');
+    const authorized = Boolean(fields) && draft.authorized;
+    if (fields && authorized) await grantPermission(aiHostPermission(fields.endpoint));
+    const config = fields ? { ...fields, apiKey: apiKey ?? undefined } : null;
+    const result = await request<PublicSettings>({ type: 'save-ai', provider, config, authorized });
+    if (result.ok) {
+      adoptProviders(result.value);
+      setAiDrafts((current) => ({ ...current, [provider]: undefined }));
+    }
+    aiFeedback(provider, result.ok ? (clear ? '配置已清除。' : '配置已保存。') : errors[result.error]);
+    setBusy(false);
+  }
+
   async function testConnection(provider: ProviderId) {
-    const setFeedback = provider === 'youdao' ? setYoudaoMessage : setGoogleMessage;
+    const setFeedback = provider === 'google' ? setGoogleMessage : provider === 'youdao' ? setYoudaoMessage
+      : (message: string) => aiFeedback(provider, message);
     setTesting(provider);
     setFeedback('');
     const result = await request<PublicSettings>({ type: 'test-provider', provider });
@@ -217,6 +257,7 @@ function Options() {
       setCacheBytes(0);
       setGoogleMessage('');
       setYoudaoMessage('');
+      setAiMessages({});
       setProviderMessage('');
     }
     setFeedback({ category: 'sites', text: result.ok ? '已恢复默认设置。' : errors[result.error] });
@@ -257,7 +298,11 @@ function Options() {
             {providerMessage && <p className="feedback" role="status">{providerMessage}</p>}
           </div>
           <div className="provider-layout">
-            {visibleEditor === 'youdao' ? <form key="youdao" aria-label="有道智云" onSubmit={(event) => {
+            {aiEditor && aiConfig ? <AiProviderForm key={aiEditor} provider={aiEditor} draft={aiConfig} saved={savedAi}
+              status={settings.providers[aiEditor]} busy={busy} feedback={aiMessages[aiEditor] ?? ''}
+              onChange={(draft) => setAiDrafts((current) => ({ ...current, [aiEditor]: draft }))}
+              onSave={(clear) => void saveAi(aiEditor, aiConfig, clear)} onTest={() => void testConnection(aiEditor)} />
+              : visibleEditor === 'youdao' ? <form key="youdao" aria-label="有道智云" onSubmit={(event) => {
               event.preventDefault();
               void saveYoudao();
             }}>

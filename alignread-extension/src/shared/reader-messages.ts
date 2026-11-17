@@ -1,3 +1,5 @@
+import { AI_PROVIDERS, type AiProviderId, type AiSettings } from './ai-settings';
+
 export const LANGUAGES = {
   'zh-CN': '简体中文', 'zh-TW': '繁體中文', en: '英语', ja: '日语',
   ko: '韩语', fr: '法语', de: '德语', es: '西班牙语', pt: '葡萄牙语',
@@ -20,8 +22,10 @@ export type Preferences = ReadingOptions & {
 export const TRANSLATION_PROVIDERS = {
   google: { label: 'Google Cloud Translation Basic', origin: 'https://translation.googleapis.com/*' },
   youdao: { label: '有道智云', origin: 'https://openapi.youdao.com/*' },
+  ...AI_PROVIDERS,
 } as const;
 export type ProviderId = keyof typeof TRANSLATION_PROVIDERS;
+export const PROVIDER_IDS = Object.keys(TRANSLATION_PROVIDERS) as ProviderId[];
 export type ProviderCheck = { checkedAt: number; error?: ErrorCode };
 export type ProviderStatus = {
   configured: boolean;
@@ -33,6 +37,7 @@ export type ProviderStatus = {
 export type PublicSettings = Omit<Preferences, 'authorized'> & {
   provider: ProviderId;
   providers: Record<ProviderId, ProviderStatus>;
+  aiServices: Record<AiProviderId, AiSettings | null>;
 };
 export type YoudaoCredentials = { appKey: string; appSecret: string };
 export const MAX_YOUDAO_CREDENTIAL_LENGTH = 250;
@@ -62,6 +67,8 @@ export const errors = {
   'timeout': '翻译请求超时，可重试失败段落。',
   'network': '无法连接翻译服务，请检查网络。',
   'invalid-response': '翻译服务返回了无法匹配的结果。',
+  'ai-config': '请填写有效的 HTTPS Chat Completions 地址、模型和 API 密钥。',
+  'ai-endpoint': 'AI 服务找不到接口或模型，请检查地址和模型名称。',
   'provider-error': '翻译服务暂时无法处理该请求。',
   'provider-changed': '当前翻译服务已切换，请重新开启双栏。',
   'config-changed': '翻译配置在测试期间发生变化，请重新测试。',
@@ -104,6 +111,7 @@ export type OptionsMessage =
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
   | { type: 'save-youdao'; credentials?: YoudaoCredentials | null; authorized: boolean }
+  | { type: 'save-ai'; provider: AiProviderId; config: (AiSettings & { apiKey?: string }) | null; authorized: boolean }
   | { type: 'test-provider'; provider: ProviderId }
   | { type: 'select-provider'; provider: ProviderId }
   | { type: 'clear-cache' | 'cache-usage' }
