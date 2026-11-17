@@ -3,7 +3,7 @@
 ## 待发布
 
 - 设置改用独立标签页，按功能分区保存。加宽工具栏弹窗，统一采用新拟物风格。
-- 接入兼容 OpenAI Chat Completions 的 AI 翻译服务，支持双栏和选词翻译、域名授权及连接测试。
+- 接入 DeepSeek、MiniMax 和自定义 OpenAI Chat Completions 服务，支持双栏和选词翻译、域名授权及连接测试。MiniMax 支持中国站和国际站。
 
 ## 0.1.5
 

@@ -4,10 +4,15 @@ const endpoint = 'https://model.example.test/v1/chat/completions';
 const host = 'https://model.example.test/*';
 const fields = {endpoint, model: 'example-model'};
 const config = {...fields, apiKey: 'sample-ai-secret'};
+const deepseek = { endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', apiKey: 'sample-deepseek-key' };
+const minimax = { endpoint: 'https://api.minimax.cn/v1/chat/completions', model: 'MiniMax-M3.1-Flash', apiKey: 'sample-minimax-key' };
+const minimaxGlobal = 'https://api.minimax.io/v1/chat/completions';
+const permissionFor = (endpoint) => new URL(endpoint).origin + '/*';
 
-async function aiResponse(options, mode) {
+async function aiResponse(options, mode, url) {
   const body = JSON.parse(options.body);
   const {items} = JSON.parse(body.messages[1].content);
+  if (typeof mode === 'number') return Response.json({base_resp: {status_code: mode}});
   if (mode === 'auth') return new Response(null, {status: 401});
   if (mode === 'rate-limit') return new Response(null, {status: 429});
   if (mode === 'missing') return new Response(null, {status: 404});
@@ -20,14 +25,21 @@ async function aiResponse(options, mode) {
   if (mode === 'duplicate') rows[1].index = rows[0].index;
   if (mode === 'unknown') rows[0].index = items.length;
   if (mode === 'incomplete') rows.pop();
+  const plain = JSON.stringify({items: rows});
   return Response.json({choices: [{finish_reason: 'stop', message: {
-    content: '```json\n' + JSON.stringify({items: rows}) + '\n```',
+    content: url === deepseek.endpoint ? plain : '```json\n' + plain + '\n```',
+    ...(url.includes('minimax.') && {reasoning_content: 'Separate reasoning field'}),
   }}]});
 }
 
-async function checkAiWorker({request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission}) {
-  const save = (config, authorized = true) => request({type: 'save-ai', config, authorized});
+async function checkAiWorker({request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local}) {
+  const save = (config, authorized = true) => request({type: 'save-ai', provider: 'ai', config, authorized});
   const test = () => request({type: 'test-provider', provider: 'ai'});
+  delete local.providerSettings.aiServices;
+  Object.assign(local.providerSettings, {ai: config, aiAuthorized: true});
+  assert.deepEqual((await settings()).aiServices.ai, fields);
+  assert((await settings()).providers.ai.consent);
+  assert(!JSON.stringify(await settings()).includes(config.apiKey));
   await request({type: 'reset'});
   const beforeSetup = calls.length;
   assert.deepEqual(await test(), {ok: false, error: 'not-configured'});
@@ -37,7 +49,7 @@ async function checkAiWorker({request, dispatch, settings, tabs, grants, session
     'https://model.example.test/v1/models',
   ]) assert.deepEqual(await save({...config, endpoint}), {ok: false, error: 'ai-config'});
   assert((await save(config)).ok);
-  assert.deepEqual((await settings()).ai, fields);
+  assert.deepEqual((await settings()).aiServices.ai, fields);
   assert(!JSON.stringify(await settings()).includes(config.apiKey));
   assert.deepEqual(await test(), {ok: false, error: 'consent-required'});
   grants.add(host);
@@ -112,8 +124,68 @@ async function checkAiWorker({request, dispatch, settings, tabs, grants, session
   assert((await settings()).providers.ai.hostPermission);
   await request({type: 'reset'});
   assert(!grants.has(newHost));
-  assert.equal((await settings()).ai, null);
+  assert.equal((await settings()).aiServices.ai, null);
   console.log('AI translation passed setup, credentials, permissions, connection, reader, selection, and response validation.');
 }
 
-module.exports = {aiResponse, checkAiWorker, config, host};
+async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, session, calls, setResponse}) {
+  const save = (provider, config) => request({type: 'save-ai', provider, config, authorized: true});
+  const test = (provider) => request({type: 'test-provider', provider});
+  const services = {deepseek, minimax};
+  const tabId = 71;
+  const url = 'https://article.example.test/selected';
+  const documentId = 'named-ai-doc';
+  tabs.set(tabId, {url, documentId});
+  for (const [provider, service] of Object.entries(services)) {
+    const {endpoint, model, apiKey} = service;
+    assert.deepEqual(await save(provider, {...service, endpoint: config.endpoint}), {ok: false, error: 'ai-config'});
+    assert((await save(provider, service)).ok);
+    assert.deepEqual(await test(provider), {ok: false, error: 'consent-required'});
+    grants.add(permissionFor(endpoint));
+    assert.equal((await test(provider)).value.providers[provider].lastCheck.error, undefined);
+
+    const call = calls.at(-1);
+    const body = JSON.parse(call.options.body);
+    assert.equal(call.url, endpoint);
+    assert.equal(call.options.headers.Authorization, 'Bearer ' + apiKey);
+    assert.equal(body.model, model);
+    if (provider === 'deepseek') {
+      assert.deepEqual(body.response_format, {type: 'json_object'});
+      assert.deepEqual(body.thinking, {type: 'disabled'});
+      assert.equal(body.reasoning_split, undefined);
+    } else {
+      assert.equal(body.reasoning_split, true);
+      assert.equal(body.reasoning_effort, 'low');
+      assert.equal(body.response_format, undefined);
+    }
+
+    await request({type: 'select-provider', provider});
+    assert((await request({type: 'selection-start', tabId, provider, options: {
+      source: 'en', target: 'zh-CN', range: 'main',
+    }}, 'popup')).ok);
+    assert.deepEqual(await dispatch({type: 'selection:translate', sessionId: session['selection:71'].session.id,
+      requestId: provider, text: 'Selected'}, {tab: {id: tabId}, documentId, url, frameId: 0}), {ok: true, value: '译 Selected'});
+  }
+
+  for (const [code, error] of [[1002, 'rate-limit'], [1004, 'authentication'], [1008, 'quota'], [2022, 'ai-endpoint']]) {
+    setResponse(code);
+    assert.equal((await test('minimax')).value.providers.minimax.lastCheck.error, error);
+  }
+  setResponse('success');
+  assert.deepEqual(await save('minimax', {endpoint: minimaxGlobal, model: minimax.model}), {ok: false, error: 'ai-config'});
+  grants.add(permissionFor(minimaxGlobal));
+  assert((await save('minimax', {...minimax, endpoint: minimaxGlobal, apiKey: 'sample-global-key'})).ok);
+  assert(!grants.has(permissionFor(minimax.endpoint)));
+  assert.equal((await test('minimax')).value.providers.minimax.lastCheck.error, undefined);
+  const view = await settings();
+  assert.equal(view.aiServices.minimax.endpoint, minimaxGlobal);
+  assert.equal(view.aiServices.deepseek.endpoint, deepseek.endpoint);
+  assert(!JSON.stringify(view).includes(deepseek.apiKey));
+  assert(!JSON.stringify(view).includes('sample-global-key'));
+  assert(view.providers.deepseek.hostPermission);
+  await request({type: 'reset'});
+  assert(!grants.has(permissionFor(deepseek.endpoint)) && !grants.has(permissionFor(minimaxGlobal)));
+  console.log('DeepSeek and MiniMax passed official request formats, isolated keys, MiniMax error codes and region changes.');
+}
+
+module.exports = {aiResponse, checkAiWorker, checkNamedAiWorkers, config, host, deepseek, minimax, minimaxGlobal};

@@ -7,7 +7,7 @@ const {spawn} = require('node:child_process');
 const {setTimeout: wait} = require('node:timers/promises');
 const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
 const {checkSettings} = require('./settings-check.cjs');
-const {aiResponse, checkAiWorker} = require('./ai-check.cjs');
+const {aiResponse, checkAiWorker, checkNamedAiWorkers} = require('./ai-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
@@ -109,7 +109,7 @@ function startWorker() {
     async fetch(url, options) {
       calls.push({url, options});
       if (blocked) await blocked.promise;
-      if (url.endsWith('/chat/completions')) return aiResponse(options, response);
+      if (url.endsWith('/chat/completions')) return aiResponse(options, response, url);
       if (url.includes('youdao.com')) {
         const q = options.body.get('q');
         if (q === 'Pending before navigation') {
@@ -927,7 +927,11 @@ function initBrowser(version, tabId) {
 async function run() {
   if (selectionOnly || settingsOnly) startWorker();
   else await checkWorker();
-  if (!selectionOnly) await checkAiWorker({request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission});
+  if (!selectionOnly) {
+    const aiWorker = {request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local};
+    await checkAiWorker(aiWorker);
+    await checkNamedAiWorkers(aiWorker);
+  }
   if (!settingsOnly) await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
   await checkOptions();
 }

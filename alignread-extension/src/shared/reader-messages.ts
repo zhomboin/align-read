@@ -1,4 +1,4 @@
-import type { AiSettings } from './ai-settings';
+import { AI_PROVIDERS, type AiProviderId, type AiSettings } from './ai-settings';
 
 export const LANGUAGES = {
   'zh-CN': '简体中文', 'zh-TW': '繁體中文', en: '英语', ja: '日语',
@@ -22,9 +22,10 @@ export type Preferences = ReadingOptions & {
 export const TRANSLATION_PROVIDERS = {
   google: { label: 'Google Cloud Translation Basic', origin: 'https://translation.googleapis.com/*' },
   youdao: { label: '有道智云', origin: 'https://openapi.youdao.com/*' },
-  ai: { label: 'AI 翻译' },
+  ...AI_PROVIDERS,
 } as const;
 export type ProviderId = keyof typeof TRANSLATION_PROVIDERS;
+export const PROVIDER_IDS = Object.keys(TRANSLATION_PROVIDERS) as ProviderId[];
 export type ProviderCheck = { checkedAt: number; error?: ErrorCode };
 export type ProviderStatus = {
   configured: boolean;
@@ -36,7 +37,7 @@ export type ProviderStatus = {
 export type PublicSettings = Omit<Preferences, 'authorized'> & {
   provider: ProviderId;
   providers: Record<ProviderId, ProviderStatus>;
-  ai: AiSettings | null;
+  aiServices: Record<AiProviderId, AiSettings | null>;
 };
 export type YoudaoCredentials = { appKey: string; appSecret: string };
 export const MAX_YOUDAO_CREDENTIAL_LENGTH = 250;
@@ -109,7 +110,7 @@ export type OptionsMessage =
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
   | { type: 'save-youdao'; credentials?: YoudaoCredentials | null; authorized: boolean }
-  | { type: 'save-ai'; config: (AiSettings & { apiKey?: string }) | null; authorized: boolean }
+  | { type: 'save-ai'; provider: AiProviderId; config: (AiSettings & { apiKey?: string }) | null; authorized: boolean }
   | { type: 'test-provider'; provider: ProviderId }
   | { type: 'select-provider'; provider: ProviderId }
   | { type: 'clear-cache' | 'cache-usage' }

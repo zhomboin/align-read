@@ -79,7 +79,7 @@
 | F-03 | 页面内左右双栏阅读 | P0 | 原网页 + 右侧只读译文；可拖动分隔条 |
 | F-04 | 段落级双向高亮与点击定位 | P0 | 直接点击文字定位对侧，译文段落支持 Enter |
 | F-05 | 双向按段落同步滚动 | P0 | 可开关；防反馈循环 |
-| F-06 | 翻译 Provider、调度、进度与重试 | P0 | 接入 Google Cloud Translation Basic、有道智云和兼容 Chat Completions 的 AI 服务 |
+| F-06 | 翻译 Provider、调度、进度与重试 | P0 | 接入 Google Cloud Translation Basic、有道智云、DeepSeek、MiniMax 和自定义 Chat Completions 服务 |
 | F-07 | 原网页恢复、失败回退 | P0 | 关闭或切换后不残留插件修改 |
 | F-08 | 设置、语言、缓存与隐私告知 | P0 | 目标语言、缓存开关、页面授权 |
 | F-09 | 选词弹窗翻译 | P1 | 当前标签页手动开启，点击选区旁的「译」后发送 |
@@ -232,12 +232,12 @@ flowchart TD
 
 ### 7.3 Provider 设计
 
-发布验收要求至少一个获得正式授权的翻译服务完成真实接口验证。支持 Google Cloud Translation Basic、有道智云批量文本翻译和兼容 OpenAI Chat Completions 的 AI 服务。用户自带凭据，并分别同意文本外发和授予 API 域名权限。
+发布验收要求至少一个获得正式授权的翻译服务完成真实接口验证。支持 Google Cloud Translation Basic、有道智云批量文本翻译、DeepSeek、MiniMax 和兼容 OpenAI Chat Completions 的自定义 AI 服务。用户自带凭据，并分别同意文本外发和授予 API 域名权限。
 
 | 类别 | MVP 要求 | 备注 |
 |---|---|---|
 | 翻译服务接口 | 统一 `translateSegments()` 协议 | 不绑定单一厂商 SDK |
-| 官方云端 API | 可作为 P0 Provider | 需遵守计费、CORS、鉴权、限流、许可条款 |
+| 官方云端 API | 支持 DeepSeek 和 MiniMax 的 Chat Completions | DeepSeek 使用固定官方接口，MiniMax 可选中国站和国际站。服务分别保存模型、密钥和授权 |
 | 自建 OpenAI 兼容接口 | 已接入双栏与选词翻译 | 用户配置 HTTPS 地址、模型和密钥，浏览器按需授予该域名权限 |
 | Chrome 浏览器内 Translator API | 候选 P2 | 依赖 Chrome 版本、语言对、模型可用性和用户环境，不能保证所有用户可用 |
 

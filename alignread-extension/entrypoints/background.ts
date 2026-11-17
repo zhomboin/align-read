@@ -7,9 +7,9 @@ import { ai } from '../src/background/translation/ai';
 import { google } from '../src/background/translation/google';
 import type { TranslationBatch } from '../src/background/translation/provider';
 import { youdao } from '../src/background/translation/youdao';
-import { parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
+import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
 import {
-  LIMITS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
+  LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
   isSensitive, isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
@@ -109,13 +109,12 @@ async function updateProviderSettings(update: (current: Settings) => Settings) {
   const saved = await updateSettings((current) => {
     const next = update(current);
     if (next === current) return current;
-    const same = (provider: ProviderId) => sameCredentials(provider, current, next);
-    next.checks = {
-      google: same('google') ? current.checks.google : null,
-      youdao: same('youdao') ? current.checks.youdao : null,
-      ai: same('ai') ? current.checks.ai : null,
-    };
-    const accessChanged = !same(current.provider) || providerConsent(current, current.provider) !== providerConsent(next, current.provider);
+    next.checks = { ...current.checks };
+    for (const provider of PROVIDER_IDS) {
+      if (!sameCredentials(provider, current, next)) next.checks[provider] = null;
+    }
+    const accessChanged = !sameCredentials(current.provider, current, next) ||
+      providerConsent(current, current.provider) !== providerConsent(next, current.provider);
     if (next.provider === current.provider && !accessChanged) return next;
     previousRevision = current.revision;
     return { ...next, revision: crypto.randomUUID() };
@@ -164,8 +163,9 @@ async function options(message: OptionsMessage) {
       return success(await publicSettings(settings));
     }
     case 'save-ai': {
-      const { config, authorized } = message;
-      const fields = isRecord(config) ? parseAiSettings(config) : null;
+      const { config, authorized, provider } = message;
+      if (!isAiProviderId(provider)) return failure('ai-config');
+      const fields = isRecord(config) ? parseAiSettings(provider, config) : null;
       const key = isRecord(config) ? parseAiKey(config.apiKey) : null;
       if (typeof authorized !== 'boolean' || (config !== null && (!fields ||
           (config.apiKey !== undefined && !key)))) return failure('ai-config');
@@ -173,14 +173,15 @@ async function options(message: OptionsMessage) {
       let oldOrigin: string | undefined;
       let missingKey = false;
       const settings = await updateProviderSettings((current) => {
-        const apiKey = key ?? (current.ai?.endpoint === fields?.endpoint ? current.ai?.apiKey : undefined);
+        const previous = current.aiServices[provider];
+        const apiKey = key ?? (previous?.endpoint === fields?.endpoint ? previous?.apiKey : undefined);
         if (fields && !apiKey) {
           missingKey = true;
           return current;
         }
-        oldOrigin = providerOrigin(current, 'ai');
-        const ai = fields && apiKey ? { ...fields, apiKey } : null;
-        return { ...current, ai, aiAuthorized: Boolean(ai) && authorized };
+        oldOrigin = providerOrigin(current, provider);
+        const service = fields && apiKey ? { ...fields, apiKey, authorized } : null;
+        return { ...current, aiServices: { ...current.aiServices, [provider]: service } };
       });
       if (missingKey) return failure('ai-config');
       await removeUnusedProviderPermissions([oldOrigin]);
@@ -205,16 +206,16 @@ async function options(message: OptionsMessage) {
       await clearCaches();
       return success(null);
     case 'reset': {
-      let aiOrigin: string | undefined;
+      let origins: (string | undefined)[] = [];
       const settings = await updateSettings((current) => {
-        aiOrigin = providerOrigin(current, 'ai');
+        origins = PROVIDER_IDS.map((provider) => providerOrigin(current, provider));
         return {
           ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
-          ai: null, aiAuthorized: false, checks: {},
+          aiServices: { ...EMPTY_AI_SERVICES }, checks: {},
         };
       });
       await stopSessions(() => true);
-      await removeUnusedProviderPermissions([TRANSLATION_PROVIDERS.google.origin, TRANSLATION_PROVIDERS.youdao.origin, aiOrigin]);
+      await removeUnusedProviderPermissions(origins);
       return success(await publicSettings(settings));
     }
     default:
@@ -228,7 +229,7 @@ async function testProvider(provider: ProviderId) {
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
 
   const item = { id: 'connection-test', text: 'Hello, world!' };
-  const signal = AbortSignal.timeout(provider === 'ai' ? 28_000 : 22_000);
+  const signal = AbortSignal.timeout(isAiProviderId(provider) ? 28_000 : 22_000);
   const result = await translateWithProvider(provider, settings, {
     id: item.id, items: [item], source: 'en', target: 'zh-CN', range: 'visible',
   }, signal);
@@ -439,7 +440,10 @@ function translateWithProvider(provider: ProviderId, settings: Settings, request
   switch (provider) {
     case 'google': return settings.key ? google.translateSegments(request, settings.key, signal) : failure('not-configured');
     case 'youdao': return settings.youdao ? youdao.translateSegments(request, settings.youdao, signal) : failure('not-configured');
-    case 'ai': return settings.ai ? ai.translateSegments(request, settings.ai, signal) : failure('not-configured');
+    default: {
+      const service = settings.aiServices[provider];
+      return service ? ai.translateSegments(request, { ...service, provider }, signal) : failure('not-configured');
+    }
   }
 }
 

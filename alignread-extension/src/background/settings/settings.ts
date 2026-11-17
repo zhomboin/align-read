@@ -1,20 +1,22 @@
 import { browser } from 'wxt/browser';
-import { aiHostPermission, parseAiKey, parseAiSettings, type AiCredentials } from '../../shared/ai-settings';
 import {
-  MAX_YOUDAO_CREDENTIAL_LENGTH, TRANSLATION_PROVIDERS, clampRatio, defaults, errors, isProviderId, isReadingOptions, isRecord,
+  AI_PROVIDER_IDS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, parseAiKey, parseAiSettings,
+  type AiCredentials, type AiProviderId, type AiSettings,
+} from '../../shared/ai-settings';
+import {
+  MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, errors, isProviderId, isReadingOptions, isRecord,
   type ErrorCode, type Preferences, type ProviderCheck, type ProviderId, type PublicSettings, type YoudaoCredentials,
 } from '../../shared/reader-messages.ts';
 
 const KEY = 'providerSettings';
-const providerIds = Object.keys(TRANSLATION_PROVIDERS) as ProviderId[];
+type SavedAiService = AiCredentials & { authorized: boolean };
 export type Settings = Preferences & {
   provider: ProviderId;
   key: string;
   revision: string;
   youdao: YoudaoCredentials | null;
   youdaoAuthorized: boolean;
-  ai: AiCredentials | null;
-  aiAuthorized: boolean;
+  aiServices: Record<AiProviderId, SavedAiService | null>;
   checks: Partial<Record<ProviderId, ProviderCheck | null>>;
 };
 let initialization: Promise<void> | undefined;
@@ -26,35 +28,41 @@ export async function getSettings(): Promise<Settings> {
   await initialization;
   const { [KEY]: stored } = await browser.storage.local.get(KEY);
   const saved = isRecord(stored) ? stored : {};
-  const checks = isRecord(saved.checks) ? saved.checks : {};
-  const aiSettings = isRecord(saved.ai) ? parseAiSettings(saved.ai) : null;
-  const aiKey = isRecord(saved.ai) ? parseAiKey(saved.ai.apiKey) : null;
+  const storedChecks = isRecord(saved.checks) ? saved.checks : {};
+  const checks: Settings['checks'] = {};
+  for (const provider of PROVIDER_IDS) checks[provider] = parseCheck(storedChecks[provider]);
+  const storedAi: Record<string, unknown> = isRecord(saved.aiServices) ? saved.aiServices : {
+    ai: isRecord(saved.ai) ? { ...saved.ai, authorized: saved.aiAuthorized } : null,
+  };
+  const aiServices: Settings['aiServices'] = { ...EMPTY_AI_SERVICES };
+  for (const provider of AI_PROVIDER_IDS) aiServices[provider] = readAiService(provider, storedAi[provider]);
   return { ...normalize(saved),
     provider: isProviderId(saved.provider) ? saved.provider : 'google',
     key: typeof saved.key === 'string' ? saved.key : '',
     revision: typeof saved.revision === 'string' ? saved.revision : '',
     youdao: parseYoudaoCredentials(saved.youdao),
     youdaoAuthorized: saved.youdaoAuthorized === true,
-    ai: aiSettings && aiKey ? { ...aiSettings, apiKey: aiKey } : null,
-    aiAuthorized: saved.aiAuthorized === true && Boolean(aiSettings && aiKey),
-    checks: { google: parseCheck(checks.google), youdao: parseCheck(checks.youdao), ai: parseCheck(checks.ai) },
+    aiServices, checks,
   };
 }
 
 export async function publicSettings(settings: Settings): Promise<PublicSettings> {
-  const { key, revision: _, youdao, ai, checks, authorized, youdaoAuthorized, aiAuthorized, ...preferences } = settings;
-  const [googlePermission, youdaoPermission, aiPermission] = await Promise.all([
-    hasHostPermission(settings, 'google'), hasHostPermission(settings, 'youdao'), hasHostPermission(settings, 'ai'),
-  ]);
-  return { ...preferences, ai: ai ? { endpoint: ai.endpoint, model: ai.model } : null, providers: {
-    google: { configured: Boolean(key), consent: authorized, hostPermission: googlePermission,
-      lastCheck: key ? checks.google ?? null : null },
-    youdao: { configured: youdao !== null, consent: youdaoAuthorized, hostPermission: youdaoPermission,
-      lastCheck: youdao ? checks.youdao ?? null : null,
-      appKeySuffix: youdao && youdao.appKey.length > 4 ? youdao.appKey.slice(-4) : undefined },
-    ai: { configured: ai !== null, consent: aiAuthorized, hostPermission: aiPermission,
-      lastCheck: ai ? checks.ai ?? null : null },
-  } };
+  const { key: _key, revision: _revision, youdao, checks, authorized: _authorized,
+    youdaoAuthorized: _youdaoAuthorized, aiServices, ...preferences } = settings;
+  const publicAi: Record<AiProviderId, AiSettings | null> = { ...EMPTY_AI_SERVICES };
+  for (const provider of AI_PROVIDER_IDS) {
+    const service = aiServices[provider];
+    if (service) publicAi[provider] = { endpoint: service.endpoint, model: service.model };
+  }
+  const statuses = await Promise.all(PROVIDER_IDS.map(async (provider) => {
+    const configured = isConfigured(settings, provider);
+    return [provider, {
+      configured, consent: providerConsent(settings, provider), hostPermission: await hasHostPermission(settings, provider),
+      lastCheck: configured ? checks[provider] ?? null : null,
+      ...(provider === 'youdao' && youdao && youdao.appKey.length > 4 && { appKeySuffix: youdao.appKey.slice(-4) }),
+    }] as const;
+  }));
+  return { ...preferences, aiServices: publicAi, providers: Object.fromEntries(statuses) as PublicSettings['providers'] };
 }
 
 export async function hasProviderPermission(settings: Settings, provider: ProviderId) {
@@ -65,13 +73,14 @@ export function providerConsent(settings: Settings, provider: ProviderId) {
   switch (provider) {
     case 'google': return settings.authorized;
     case 'youdao': return settings.youdaoAuthorized;
-    case 'ai': return settings.aiAuthorized;
+    default: return settings.aiServices[provider]?.authorized === true;
   }
 }
 
 export function providerOrigin(settings: Settings, provider: ProviderId) {
-  if (provider !== 'ai') return TRANSLATION_PROVIDERS[provider].origin;
-  return settings.ai ? aiHostPermission(settings.ai.endpoint) : undefined;
+  if (!isAiProviderId(provider)) return TRANSLATION_PROVIDERS[provider].origin;
+  const service = settings.aiServices[provider];
+  return service ? aiHostPermission(service.endpoint) : undefined;
 }
 
 async function hasHostPermission(settings: Settings, provider: ProviderId) {
@@ -81,7 +90,7 @@ async function hasHostPermission(settings: Settings, provider: ProviderId) {
 
 export async function removeUnusedProviderPermissions(origins: (string | undefined)[]) {
   const settings = await getSettings();
-  const inUse = new Set(providerIds.filter((provider) => providerConsent(settings, provider))
+  const inUse = new Set(PROVIDER_IDS.filter((provider) => providerConsent(settings, provider))
     .map((provider) => providerOrigin(settings, provider)));
   const unused = [...new Set(origins)].filter((origin): origin is string => Boolean(origin && !inUse.has(origin)));
   if (unused.length) await browser.permissions.remove({ origins: unused });
@@ -91,7 +100,7 @@ export function isConfigured(settings: Settings, provider: ProviderId) {
   switch (provider) {
     case 'google': return Boolean(settings.key);
     case 'youdao': return Boolean(settings.youdao);
-    case 'ai': return Boolean(settings.ai);
+    default: return Boolean(settings.aiServices[provider]);
   }
 }
 
@@ -99,9 +108,19 @@ export function sameCredentials(provider: ProviderId, first: Settings, second: S
   switch (provider) {
     case 'google': return first.key === second.key;
     case 'youdao': return first.youdao?.appKey === second.youdao?.appKey && first.youdao?.appSecret === second.youdao?.appSecret;
-    case 'ai': return first.ai?.endpoint === second.ai?.endpoint && first.ai?.model === second.ai?.model &&
-      first.ai?.apiKey === second.ai?.apiKey;
+    default: {
+      const previous = first.aiServices[provider];
+      const next = second.aiServices[provider];
+      return previous?.endpoint === next?.endpoint && previous?.model === next?.model && previous?.apiKey === next?.apiKey;
+    }
   }
+}
+
+function readAiService(provider: AiProviderId, value: unknown): SavedAiService | null {
+  if (!isRecord(value)) return null;
+  const fields = parseAiSettings(provider, value);
+  const apiKey = parseAiKey(value.apiKey);
+  return fields && apiKey ? { ...fields, apiKey, authorized: value.authorized === true } : null;
 }
 
 function parseCheck(value: unknown): ProviderCheck | null {

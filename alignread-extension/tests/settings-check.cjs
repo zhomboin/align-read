@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {config: aiConfig, host: aiHost} = require('./ai-check.cjs');
+const {config: aiConfig, host: aiHost, deepseek, minimax, minimaxGlobal} = require('./ai-check.cjs');
 
 async function checkSettings({page, evaluate, until, manifest, request, local, grants, setPermission, setResponse}) {
   const resize = (width) => page('Emulation.setDeviceMetricsOverride', {width, height: 850, deviceScaleFactor: 1, mobile: false});
@@ -134,6 +134,30 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await click('button.destructive');
   await until(() => statusIncludes('未保存'));
   assert(!grants.has(aiHost));
+
+  await click('.provider-switch button:nth-last-child(2)');
+  assert(await evaluate(`${providerForm}.querySelector('[name=endpoint]').readOnly`));
+  assert.equal(await evaluate(`${providerForm}.querySelector('[name=endpoint]').value`), deepseek.endpoint);
+  assert.equal(await evaluate(`${providerForm}.querySelector('[name=model]').value`), deepseek.model);
+  await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), ${JSON.stringify(deepseek.apiKey)})`);
+  await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
+  await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
+  await until(() => statusIncludes('已保存'));
+  await click('.provider-switch button:last-child');
+  assert.equal(await evaluate(`${providerForm}.querySelector('[name=endpoint]').value`), minimax.endpoint);
+  assert.equal(await evaluate(`${providerForm}.querySelector('[name=model]').value`), minimax.model);
+  await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), ${JSON.stringify(minimax.apiKey)})`);
+  await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
+  await evaluate(`fill(${providerForm}.querySelector('[name=endpoint]'), ${JSON.stringify(minimaxGlobal)}, 'change')`);
+  assert.equal(await evaluate(`${providerForm}.querySelector('input[type=password]').value`), '');
+  assert.equal(await evaluate(`${providerForm}.querySelector('input[type=checkbox]').checked`), false);
+  await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), ${JSON.stringify(minimax.apiKey)})`);
+  await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
+  await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
+  await until(() => statusIncludes('已保存'));
+  assert.deepEqual([...grants], ['https://api.deepseek.com/*', 'https://api.minimax.io/*']);
+  assert(await noOverflow());
+  await request({type: 'reset'});
   console.log('Built settings passed popup entry, desktop and narrow layouts, permission and connection feedback, scoped saves, keyboard input, and reset.');
 }
 

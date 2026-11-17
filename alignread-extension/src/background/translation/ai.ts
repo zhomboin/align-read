@@ -1,5 +1,5 @@
-import type { AiCredentials } from '../../shared/ai-settings';
-import { LANGUAGES, failure, isRecord, success, type TranslationItem } from '../../shared/reader-messages';
+import { AI_PROVIDERS, type AiCredentials, type AiProviderId } from '../../shared/ai-settings';
+import { LANGUAGES, failure, isRecord, success, type ErrorCode, type TranslationItem } from '../../shared/reader-messages';
 import type { TranslationBatch, TranslationProvider } from './provider';
 
 const instructions = [
@@ -10,8 +10,8 @@ const instructions = [
   'Include each original integer index exactly once. Keep all items separate.',
 ].join(' ');
 
-export const ai: TranslationProvider<AiCredentials> = {
-  async translateSegments(request, { endpoint, model, apiKey }, signal) {
+export const ai: TranslationProvider<AiCredentials & { provider: AiProviderId }> = {
+  async translateSegments(request, { endpoint, model, apiKey, provider }, signal) {
     const timeout = AbortSignal.timeout(25_000);
     const input = {
       source: request.source === 'auto' ? 'auto' : LANGUAGES[request.source],
@@ -23,7 +23,7 @@ export const ai: TranslationProvider<AiCredentials> = {
         method: 'POST', credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.any([signal, timeout]),
-        body: JSON.stringify({ model, stream: false, messages: [
+        body: JSON.stringify({ model, stream: false, ...requestOptions(provider, model), messages: [
           { role: 'system', content: instructions },
           { role: 'user', content: JSON.stringify(input) },
         ] }),
@@ -33,7 +33,9 @@ export const ai: TranslationProvider<AiCredentials> = {
       if (response.status === 404) return failure('ai-endpoint');
       if (response.status === 429) return failure('rate-limit');
       if (!response.ok) return failure('provider-error');
-      return readBatch(request, JSON.parse(await response.text()));
+      const data: unknown = JSON.parse(await response.text());
+      const error = provider === 'minimax' ? miniMaxError(data) : undefined;
+      return error ? failure(error) : readBatch(request, data);
     } catch (error) {
       if (signal.aborted) return failure('stale');
       if (timeout.aborted) return failure('timeout');
@@ -41,6 +43,27 @@ export const ai: TranslationProvider<AiCredentials> = {
     }
   },
 };
+
+function requestOptions(provider: AiProviderId, model: string) {
+  if (provider === 'deepseek') return { response_format: { type: 'json_object' }, thinking: { type: 'disabled' } };
+  if (provider !== 'minimax') return {};
+  if (model === AI_PROVIDERS.minimax.model) return { reasoning_split: true, reasoning_effort: 'low' };
+  if (model === 'MiniMax-M3') return { reasoning_split: true, thinking: { type: 'disabled' } };
+  return { reasoning_split: true };
+}
+
+function miniMaxError(data: unknown): ErrorCode | undefined {
+  const status = isRecord(data) && isRecord(data.base_resp) ? data.base_resp.status_code : undefined;
+  if (typeof status !== 'number' || status === 0) return;
+  switch (status) {
+    case 1001: case 2066: return 'timeout';
+    case 1002: case 1039: case 2062: return 'rate-limit';
+    case 1004: case 2049: return 'authentication';
+    case 1008: case 2053: case 2067: return 'quota';
+    case 2022: case 2069: return 'ai-endpoint';
+    default: return 'provider-error';
+  }
+}
 
 function readBatch(request: TranslationBatch, response: unknown) {
   const choice: unknown = isRecord(response) && Array.isArray(response.choices) ? response.choices[0] : undefined;
