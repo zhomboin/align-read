@@ -6,15 +6,18 @@ const vm = require('node:vm');
 const {spawn} = require('node:child_process');
 const {setTimeout: wait} = require('node:timers/promises');
 const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
+const {checkSettings} = require('./settings-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
-const build = process.argv.slice(2).find(argument => argument !== '--selection') ?? path.resolve(__dirname, '../.output/chrome-mv3');
+const settingsOnly = process.argv.includes('--settings');
+const build = process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
 assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
 assert.deepEqual(manifest.optional_host_permissions,
   ['https://translation.googleapis.com/*', 'https://openapi.youdao.com/*']);
 assert.equal(manifest.content_scripts, undefined);
+assert.deepEqual(manifest.options_ui, {open_in_tab: true, page: 'options.html'});
 const googleOrigin = 'https://translation.googleapis.com/*';
 const youdaoOrigin = 'https://openapi.youdao.com/*';
 const id = 'alignread-test';
@@ -323,9 +326,10 @@ async function checkOptions() {
       const relative = pathname === '/' ? '/options.html' : pathname;
       const file = path.join(build, relative);
       const content = fs.existsSync(file) ? fs.readFileSync(file) : undefined;
-      const type = {'.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html'}[path.extname(file)];
+      const type = {'.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png'}[path.extname(file)];
+      const contentType = type === 'image/png' ? type : (type ?? 'text/plain') + '; charset=utf-8';
       await send('Fetch.fulfillRequest', {requestId: params.requestId, responseCode: content ? 200 : 404,
-        responseHeaders: [{name: 'Content-Type', value: (type ?? 'text/plain') + '; charset=utf-8'}],
+        responseHeaders: [{name: 'Content-Type', value: contentType}],
         body: content?.toString('base64')}, sessionId);
     } else if (method === 'Runtime.bindingCalled') {
       const {id, message} = JSON.parse(params.payload);
@@ -357,46 +361,14 @@ async function checkOptions() {
       source: `(${initBrowser})(${JSON.stringify(manifest.version)}, ${selectionPopupTab})`,
     });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
-    await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
-    await checkSelectionPage({page, evaluate, until, build, initReader});
+    if (!settingsOnly) {
+      await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
+      await checkSelectionPage({page, evaluate, until, build, initReader});
+    }
     if (selectionOnly) return;
-    await page('Page.navigate', {url: 'http://alignread.test/options.html'});
-    const section = 'document.querySelectorAll("form section")[0]';
-    const status = section + '?.querySelector(".connection-status")';
-    const testButton = section + '.querySelectorAll("button")[1]';
-    await until(() => evaluate('document.querySelector("header small")?.textContent.includes(' + JSON.stringify(manifest.version) + ')'));
-    await until(() => evaluate(section + '?.querySelector("button")?.disabled === false'));
-    assert((await evaluate(status + '.textContent')).includes('未保存'));
-    await evaluate('fill(' + section + '.querySelector("input[type=text]"), "ui-test-789012")');
-    await evaluate('fill(' + section + '.querySelector("input[type=password]"), "ui-secret")');
-    await evaluate(section + '.querySelector("input[type=checkbox]").click()');
-    await evaluate(section + '.querySelector("button").click()');
-    await until(() => evaluate(status + '.textContent.includes("尾号 9012")'));
-    assert((await evaluate(status + '.textContent')).includes('未授予'));
-    assert(await evaluate(testButton + '.disabled'));
-    assert.equal(await evaluate(section + '.querySelector("input[type=password]").value'), '');
-    assert.equal(local.providerSettings.youdao.appSecret, 'ui-secret');
-
-    permitted = true;
-    await evaluate(section + '.querySelector("button").click()');
-    await until(() => evaluate('!' + testButton + '.disabled'));
-    await evaluate(testButton + '.click()');
-    await until(() => evaluate(status + '.textContent.includes("通过")'));
-    assert(await evaluate(status + '.querySelector("time").dateTime !== ""'));
-    await page('Page.reload');
-    await until(() => evaluate(status + '?.textContent.includes("通过")'));
-    assert.equal(await evaluate('document.querySelector("select").value'), 'google');
-    await evaluate('fill(document.querySelector("select"), "youdao", "change")');
-    await until(async () => (await settings()).provider === 'youdao');
-    response = 'auth';
-    await until(() => evaluate('!' + testButton + '.disabled'));
-    await evaluate(testButton + '.click()');
-    await until(() => evaluate(status + '.textContent.includes("翻译服务拒绝了请求")'));
-    await page('Page.reload');
-    await until(() => evaluate(status + '?.textContent.includes("翻译服务拒绝了请求")'));
-    assert.equal(await evaluate('document.querySelector("select").value'), 'youdao');
-    assert(!(await evaluate('document.body.textContent.includes("ui-secret")')));
-    console.log('Built Options UI in Chromium passed credential save, denied/granted permission, tests, persistent status, and provider selection.');
+    await checkSettings({page, evaluate, until, manifest, request, local,
+      setPermission: (value) => { permitted = value; }, setResponse: (value) => { response = value; }});
+    if (settingsOnly) return;
 
     await page('Page.navigate', {url: 'about:blank'});
     await until(() => evaluate('location.href === "about:blank"'));
@@ -928,7 +900,10 @@ function initBrowser(version, tabId) {
       alignreadRequest(JSON.stringify({id, message}));
     });
   }
-  globalThis.chrome ??= {}; chrome.runtime = {id: 'alignread-test', getManifest: () => ({version}), sendMessage: request};
+  globalThis.openedOptions = 0;
+  globalThis.chrome ??= {};
+  chrome.runtime = {id: 'alignread-test', getManifest: () => ({version}), sendMessage: request,
+    async openOptionsPage() { globalThis.openedOptions += 1; }};
   chrome.tabs = {async query() { return [{id: tabId}]; }};
   chrome.permissions = {request: ({origins}) => request({type: 'mock-permission', origins})};
   globalThis.completeRequest = (id, result) => {
@@ -942,9 +917,9 @@ function initBrowser(version, tabId) {
   };
 }
 async function run() {
-  if (selectionOnly) startWorker();
+  if (selectionOnly || settingsOnly) startWorker();
   else await checkWorker();
-  await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
+  if (!settingsOnly) await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
   await checkOptions();
 }
 

@@ -50,7 +50,7 @@ alignread-extension/
 
 | 运行上下文 | 持有的状态与职责 |
 | --- | --- |
-| Popup / Options | 通过 Worker 操作当前文档、读取摘要和保存配置。Popup 关闭后翻译继续。 |
+| Popup / Options | 工具栏弹窗操作当前文档。独立标签页中的设置按翻译服务、双栏阅读、站点与缓存分区，阅读与站点偏好按分类保存。两者都通过 Worker 处理请求。弹窗关闭后翻译继续。 |
 | Content Script | 每个顶层文档独立持有双栏和选词会话。各自使用 Shadow DOM 挂载界面，双栏负责段落映射、任务队列和会话缓存。 |
 | Service Worker | 接收扩展操作、执行注入、管理授权和设置、核验来自页面的请求、执行 Provider 批次并统一限流。 |
 | Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在各自会话内存。 |

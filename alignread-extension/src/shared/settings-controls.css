@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light;
+  --surface: #e8efeb;
+  --surface-raised: #edf3ef;
+  --surface-inset: #e3ebe6;
+  --ink: #1c332a;
+  --muted: #496157;
+  --accent: #27604c;
+  --focus: #1b6e55;
+  --field-line: #7b9387;
+  --edge: #d0ded6;
+  --light: #fafffc;
+  --shadow: #c5d4cd;
+  --raised: 5px 5px 12px var(--shadow), -5px -5px 12px var(--light);
+  --inset: inset 2px 2px 5px #cbd9d1, inset -2px -2px 5px var(--light);
+  --danger: #793e36;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--surface);
+  font: 15px/1.55 system-ui, "Microsoft YaHei UI", sans-serif;
+}
+
+h1, h2, h3, p, fieldset { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+fieldset { padding: 0; border: 0; min-inline-size: 0; }
+
+button, select, input[type="text"], input[type="password"], textarea {
+  min-inline-size: 0;
+  min-block-size: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--field-line);
+  border-radius: 10px;
+}
+
+select, input[type="text"], input[type="password"], textarea {
+  inline-size: 100%;
+  background: var(--surface-inset);
+  box-shadow: var(--inset);
+}
+
+textarea { display: block; resize: vertical; }
+::placeholder { color: var(--muted); opacity: 1; }
+
+button {
+  background: var(--surface-raised);
+  box-shadow: 2px 2px 5px var(--shadow), -2px -2px 5px var(--light);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { background: #dce8e0; }
+button:active:not(:disabled) { box-shadow: var(--inset); }
+button:disabled { opacity: .57; box-shadow: none; cursor: default; }
+
+button.primary {
+  border-color: #225440;
+  color: var(--light);
+  background: linear-gradient(155deg, #36735b, #225340);
+}
+
+button.primary:hover:not(:disabled) { background: #225440; }
+button.primary:active:not(:disabled) { box-shadow: inset 2px 2px 6px #173f31; }
+button.quiet { border-color: transparent; background: transparent; box-shadow: none; }
+button.destructive { color: var(--danger); }
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
+
+.hint { color: var(--muted); font-size: 13px; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.field, .language-fields label { display: grid; gap: 6px; font-weight: 600; min-inline-size: 0; }
+.field :is(input, select), .language-fields select { font-weight: 400; }
+.language-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.language-fields .full { grid-column: 1 / -1; }
+
+.check { display: flex; align-items: flex-start; gap: 10px; }
+.check input {
+  flex: none;
+  inline-size: 17px;
+  block-size: 17px;
+  margin: .22em 0 0;
+}
+
+@media (max-width: 340px) {
+  .language-fields { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea):focus-visible { outline-color: Highlight; }
+  button.primary { border-color: ButtonText; }
+}

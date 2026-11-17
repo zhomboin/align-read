@@ -124,9 +124,11 @@ async function options(message: OptionsMessage) {
       return success(await publicSettings(await getSettings()));
     case 'save': {
       if (!isReadingOptions(message.preferences)) return failure('unavailable');
-      const settings = await updateSettings((current) => ({
-        ...current, ...normalize(message.preferences), authorized: current.authorized,
-      }));
+      const { cache, disabledSites, authorized: _authorized, ...reading } = normalize(message.preferences);
+      const sitePreferences = { cache, disabledSites };
+      const changes = message.scope === 'reading' ? reading
+        : message.scope === 'sites' ? sitePreferences : { ...reading, ...sitePreferences };
+      const settings = await updateSettings((current) => ({ ...current, ...changes }));
       await stopSessions(({ hostname }) => isDisabled(hostname, settings));
       if (!settings.cache) await clearCaches(true);
       return success(await publicSettings(settings));

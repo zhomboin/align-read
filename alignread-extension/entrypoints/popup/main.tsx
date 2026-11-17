@@ -7,6 +7,7 @@ import {
   TRANSLATION_PROVIDERS, defaults, errors, selectedProviderAccess,
   type ErrorCode, type PageState, type ProviderId, type ReadingOptions, type ReaderState,
 } from '../../src/shared/reader-messages';
+import '../../src/shared/settings-controls.css';
 import './popup.css';
 
 const progressLabels = {
@@ -80,14 +81,16 @@ function Popup() {
     (setup ? access.configured ? 'consent-required' : 'not-configured' : undefined);
 
   return <main>
-    <header><h1>AlignRead</h1><button type="button" className="quiet"
-      onClick={() => void browser.runtime.openOptionsPage()}>设置</button></header>
-    {provider && <p>翻译服务 · {TRANSLATION_PROVIDERS[provider].label}</p>}
+    <header>
+      <div className="brand"><img src="/icons/32.png" alt="" width="28" height="28" /><h1>AlignRead</h1></div>
+      <button type="button" onClick={() => void browser.runtime.openOptionsPage()}>设置</button>
+    </header>
+    {provider && <p className="provider-name">翻译服务 · {TRANSLATION_PROVIDERS[provider].label}</p>}
     <LanguageFields value={choice} change={setChoice} locked={pending || Boolean(page?.error)} />
-    {page?.sensitive && <label className="sensitive">
+    {page?.sensitive && <label className="check sensitive">
       <input type="checkbox" checked={confirmSensitive}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />
-      此页面可能包含敏感信息，我确认可以向当前服务发送待译文字。
+      <span>此页面可能包含敏感信息，我确认可以向当前服务发送待译文字。</span>
     </label>}
     {reader && !reader.error && <p className="notice" role="status">
       {progressLabels[reader.status]}{reader.total > 0 && ' · ' + reader.done + '/' + reader.total}

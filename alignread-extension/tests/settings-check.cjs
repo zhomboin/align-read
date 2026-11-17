@@ -1,0 +1,117 @@
+const assert = require('node:assert/strict');
+
+async function checkSettings({page, evaluate, until, manifest, request, local, setPermission, setResponse}) {
+  const resize = (width) => page('Emulation.setDeviceMetricsOverride', {width, height: 850, deviceScaleFactor: 1, mobile: false});
+  const noOverflow = () => evaluate('document.documentElement.scrollWidth <= innerWidth');
+  const click = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const nav = async (category) => {
+    const link = `.settings-nav a[href="#${category}"]`;
+    await click(link);
+    await until(() => evaluate(`document.querySelector(${JSON.stringify(link)}).getAttribute('aria-current') === 'page'`));
+  };
+  const provider = '#active-provider';
+  const status = 'document.querySelector(".connection-status")';
+  const providerForm = 'document.querySelector(".provider-layout form")';
+  const testButton = `${providerForm}.querySelector('button[type="button"]')`;
+  const statusIncludes = (text) => evaluate(`${status}?.textContent.includes(${JSON.stringify(text)})`);
+  const editYoudao = () => evaluate(`Array.from(document.querySelectorAll('.provider-switch button')).find(button => button.textContent === '有道智云').click()`);
+
+  await request({type: 'reset'});
+  await resize(500);
+  await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
+  await until(() => evaluate('document.querySelector("header button")?.textContent === "设置"'));
+  assert.equal(await evaluate('document.body.getBoundingClientRect().width'), 400);
+  await click('header button');
+  assert.equal(await evaluate('openedOptions'), 1);
+  await resize(320);
+  assert(await noOverflow());
+
+  await resize(1200);
+  await page('Page.navigate', {url: 'http://alignread.test/options.html'});
+  await until(() => evaluate(`document.querySelector('header small')?.textContent.includes(${JSON.stringify(manifest.version)})`));
+  await until(() => evaluate(`document.querySelector('${provider}')?.disabled === false`));
+  assert(await evaluate('document.querySelector("main").getBoundingClientRect().width > 700'));
+  assert(await evaluate('document.querySelector("main").offsetLeft > document.querySelector("header").getBoundingClientRect().right'));
+  assert(await noOverflow());
+  assert(await statusIncludes('API 密钥'));
+
+  await editYoudao();
+  assert(await statusIncludes('未保存'));
+  assert.equal(await evaluate(`document.querySelector('${provider}').value`), 'google');
+  await evaluate(`fill(${providerForm}.querySelector('input[type=text]'), 'ui-test-789012')`);
+  await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), 'ui-secret')`);
+  await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
+  await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
+  await until(() => statusIncludes('尾号 9012'));
+  assert(await statusIncludes('未授予'));
+  assert(await evaluate(`${testButton}.disabled`));
+  assert.equal(await evaluate(`${providerForm}.querySelector('input[type=password]').value`), '');
+  assert.equal(local.providerSettings.youdao.appSecret, 'ui-secret');
+
+  setPermission(true);
+  await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
+  await until(() => evaluate(`!${testButton}.disabled`));
+  await evaluate(`${testButton}.click()`);
+  await until(() => statusIncludes('通过'));
+  assert(await evaluate(`${status}.querySelector('time').dateTime !== ''`));
+  await page('Page.reload');
+  await until(() => evaluate(`document.querySelector('${provider}')?.disabled === false`));
+  assert.equal(await evaluate(`document.querySelector('${provider}').value`), 'google');
+  await evaluate(`fill(document.querySelector('${provider}'), 'youdao', 'change')`);
+  await until(() => statusIncludes('通过'));
+  assert.equal(local.providerSettings.provider, 'youdao');
+
+  setResponse('auth');
+  await until(() => evaluate(`!${testButton}.disabled`));
+  await evaluate(`${testButton}.click()`);
+  await until(() => statusIncludes('翻译服务拒绝了请求'));
+  await page('Page.reload');
+  await until(() => statusIncludes('翻译服务拒绝了请求'));
+  assert(!(await evaluate('document.body.textContent.includes("ui-secret")')));
+
+  await resize(320);
+  assert(await noOverflow());
+  await nav('reading');
+  await evaluate(`fill(document.querySelector('.language-fields label:nth-child(2) select'), 'ja', 'change')`);
+  await evaluate('document.querySelector("#original-width").focus()');
+  await page('Input.dispatchKeyEvent', {type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39});
+  await page('Input.dispatchKeyEvent', {type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39});
+  assert.equal(await evaluate('document.querySelector("#original-width").getAttribute("aria-valuetext")'), '51%');
+  assert(await noOverflow());
+
+  await nav('sites');
+  await evaluate(`fill(document.querySelector('#disabled-sites'), 'example.test')`);
+  await click('.cache-panel input');
+  await click('button[type=submit]');
+  await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已保存")'));
+  assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
+  assert.equal(local.providerSettings.cache, false);
+  assert.equal(local.providerSettings.target, 'zh-CN');
+  assert.equal(local.providerSettings.ratio, .5);
+  assert(await noOverflow());
+
+  await evaluate(`fill(document.querySelector('#disabled-sites'), 'draft.example.test')`);
+  await nav('reading');
+  assert.equal(await evaluate('document.querySelector(".language-fields label:nth-child(2) select").value'), 'ja');
+  await click('button[type=submit]');
+  await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已保存")'));
+  assert.equal(local.providerSettings.target, 'ja');
+  assert.equal(local.providerSettings.ratio, .51);
+  assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
+  await nav('sites');
+  assert.equal(await evaluate('document.querySelector("#disabled-sites").value'), 'draft.example.test');
+
+  await evaluate('window.confirm = () => false');
+  await click('.reset');
+  assert.equal(local.providerSettings.target, 'ja');
+  await evaluate('window.confirm = () => true');
+  await click('.reset');
+  await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已恢复默认设置")'));
+  assert.equal(await evaluate('document.querySelector("#disabled-sites").value'), '');
+  assert.equal(local.providerSettings.target, 'zh-CN');
+  assert.equal(local.providerSettings.youdao, null);
+  setResponse('success');
+  console.log('Built settings passed popup entry, desktop and narrow layouts, permission and connection feedback, scoped saves, keyboard input, and reset.');
+}
+
+module.exports = {checkSettings};

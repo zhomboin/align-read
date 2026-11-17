@@ -33,7 +33,15 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 ## 提交与回归
 
-从最新的 `main` 创建开发分支。修改选词翻译时，在扩展目录构建并运行定向测试。若浏览器不在 PATH，按 [测试计划](test-plan.md#运行) 设置 `CHROMIUM_BIN`。
+从最新的 `main` 创建开发分支。修改设置界面时，在扩展目录执行下面的定向检查。若浏览器不在 PATH，按 [测试计划](test-plan.md#运行) 设置 `CHROMIUM_BIN`。
+
+```bash
+npm run check
+npm run build
+npm run test:settings
+```
+
+修改选词翻译时，在扩展目录检查类型、构建并运行选词定向测试。
 
 ```bash
 npm run check
