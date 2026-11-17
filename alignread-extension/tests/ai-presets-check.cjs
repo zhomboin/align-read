@@ -80,8 +80,10 @@ async function checkAiPresets({request, dispatch, settings, tabs, grants, sessio
       assert.equal((await test(provider)).value.providers[provider].lastCheck.error, error, provider);
     }
     if (stream) {
-      setResponse('truncated-stream');
-      assert.equal((await test(provider)).value.providers[provider].lastCheck.error, 'invalid-response');
+      for (const [mode, error] of [['connect-stalled', 'ai-connect-timeout'], ['truncated-stream', 'invalid-response']]) {
+        setResponse(mode);
+        assert.equal((await test(provider)).value.providers[provider].lastCheck.error, error, provider);
+      }
     }
     setResponse('success');
 
