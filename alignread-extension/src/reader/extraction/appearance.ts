@@ -30,6 +30,16 @@ export function readSurface(style: CSSStyleDeclaration): Surface | undefined {
   return surface;
 }
 
+export function readInlineAppearance(style: CSSStyleDeclaration, parent: CSSStyleDeclaration): CSSProperties {
+  const surface = readSurface(style);
+  const scale = Number.parseFloat(style.fontSize) / Number.parseFloat(parent.fontSize);
+  return {
+    ...surface,
+    color: surface?.color ?? (style.color !== parent.color ? style.color : undefined),
+    fontSize: Number.isFinite(scale) && scale !== 1 ? `${Math.max(.75, Math.min(1.25, scale))}em` : undefined,
+  };
+}
+
 export function textWhiteSpace(style: CSSStyleDeclaration) {
   const mode = style.whiteSpace;
   if (mode === 'pre-line') return mode;

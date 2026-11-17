@@ -1,6 +1,6 @@
 import type { ReadingRange } from '../../shared/reader-messages';
 import type { SidebarLayout } from '../layout/sidebar';
-import { inlineEmphasis, readSurface, textWhiteSpace, type Surface } from './appearance';
+import { inlineEmphasis, readInlineAppearance, readSurface, textWhiteSpace, type Surface } from './appearance';
 
 const inlineTags = {
   B: 'strong', STRONG: 'strong', I: 'em', EM: 'em', CODE: 'code', KBD: 'kbd', SAMP: 'samp',
@@ -14,6 +14,7 @@ export type Block = {
   id: string; tag: 'p' | 'pre' | 'figcaption' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'span' | 'summary';
   pieces: Piece[]; source: HTMLElement; range: Range; ranges: Range[]; snapshots: Map<Text, string>;
   whiteSpace?: ReturnType<typeof textWhiteSpace>;
+  inlineAppearance?: ReturnType<typeof readInlineAppearance>;
 };
 type BranchTag = 'ul' | 'ol' | 'li' | 'blockquote' | 'table' | 'thead' | 'tbody' | 'tfoot' |
   'tr' | 'td' | 'th' | 'caption' | 'figure' | 'section' | 'div' | 'dl' | 'dt' | 'dd';
@@ -21,6 +22,7 @@ type Branch = {
   tag: BranchTag; children: ReadingNode[]; label?: string; span?: number; rowSpan?: number; start?: number;
   side?: SidebarLayout['side']; area?: 'sidebar' | 'content';
   columns?: 'ltr' | 'rtl'; columnWeight?: number;
+  inlineRow?: { direction: 'ltr' | 'rtl'; align: 'start' | 'center' | 'end' | 'left' | 'right' };
   navigation?: NavigationLayout; current?: boolean;
   surface?: Surface; disclosure?: 'open' | 'closed';
   listColumns?: number; marker?: string; reversed?: boolean; listValue?: number;
@@ -191,11 +193,47 @@ export async function extractArticle(range: ReadingRange, signal: AbortSignal, s
     };
   }
 
+  async function readInlineRow(parent: HTMLElement, layout: CSSStyleDeclaration): Promise<Branch | undefined> {
+    if (!/^(block|flow-root)$/.test(layout.display)) return undefined;
+    const items: { element: HTMLElement; style: CSSStyleDeclaration }[] = [];
+    let atomic = false;
+    for (const child of parent.childNodes) {
+      if (child instanceof Text && child.data.trim()) return undefined;
+      if (!(child instanceof HTMLElement)) continue;
+      await pulse();
+      if (!allowed(child)) continue;
+      if (!child.matches('span,a') || child.firstElementChild || !child.textContent?.trim()) return undefined;
+      const style = getComputedStyle(child);
+      if (!/^inline(?:-(?:block|flex|grid))?$/.test(style.display) ||
+          !/^(static|relative)$/.test(style.position) || style.cssFloat !== 'none') return undefined;
+      atomic ||= style.display !== 'inline';
+      items.push({ element: child, style });
+    }
+    if (items.length < 2 || !atomic) return undefined;
+
+    const children: Block[] = [];
+    for (const { element, style } of items) {
+      const group: Run[] = [];
+      await inline(element, group);
+      const entry = block(element, 'span', group);
+      if (entry) {
+        entry.inlineAppearance = readInlineAppearance(style, layout);
+        children.push(entry);
+      }
+    }
+    const { textAlign, direction } = layout;
+    const align = textAlign === 'center' || textAlign === 'end' || textAlign === 'left' || textAlign === 'right'
+      ? textAlign : 'start';
+    return { tag: 'div', children, inlineRow: { align, direction: direction === 'rtl' ? 'rtl' : 'ltr' } };
+  }
+
   async function visit(parent: HTMLElement): Promise<ReadingNode[]> {
     const result: ReadingNode[] = [];
     const columns: Column[] = [];
     const layout = parent.children.length > 1 && parent !== sidebar?.row && !structural.has(parent.tagName)
       ? getComputedStyle(parent) : undefined;
+    const inlineRow = layout && await readInlineRow(parent, layout);
+    if (inlineRow) return [inlineRow];
     const flexOrGrid = /^(inline-)?(flex|grid)$/.test(layout?.display ?? '');
     let runs: Run[] = [];
     const flush = () => {

@@ -8,6 +8,11 @@
     main { padding: 24px; }
     .callout { background: #253a49; color: white; padding: 16px; border-radius: 8px; }
     .callout a { color: white; }
+    .announcement { text-align: center; }
+    .badge { display: inline-flex; align-items: center; background: #0066cc; color: white;
+      border-radius: 12px; padding: 0 14px; font-size: .75em; font-weight: 700; }
+    .separator { color: #777; }
+    .announcement a { display: inline-block; color: #086dc3; }
     .emphasis { font-weight: bold; font-style: italic; }
     .address { white-space: pre-line; }
     .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; list-style: square; }
@@ -18,6 +23,8 @@
 <body>
   <main>
     <h1>Reading layout structures</h1>
+    <div class="announcement"><span class="badge">News</span><span class="separator">|</span><a
+      href="https://example.com/course">New course on building and deploying applications with a practical project</a></div>
     <div class="callout">
       <h2>Important notice</h2>
       <p>Read the <a href="https://example.com/reference">reference</a>.</p>

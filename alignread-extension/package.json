@@ -13,6 +13,7 @@
     "check": "wxt prepare && tsc --noEmit",
     "test:settings": "node tests/release-check.cjs --settings",
     "test:selection": "node tests/release-check.cjs --selection",
+    "test:layout": "node tests/release-check.cjs --layout",
     "test:release": "node tests/release-check.cjs",
     "postinstall": "wxt prepare"
   },

@@ -28,6 +28,9 @@ article.with-sidebar { max-width: none; }
 [data-reading-columns] [data-reading-columns] > div { flex-basis: min(6em, 100%); }
 [data-reading-columns] > div > :first-child { margin-block-start: 0; }
 [data-reading-columns] > div > :last-child { margin-block-end: 0; }
+[data-reading-inline-row] { display: flex; align-items: center; gap: .75em; min-inline-size: 0; }
+[data-reading-inline-row] > [data-reader-block] { min-inline-size: 0; }
+[data-reading-inline-row] a { color: inherit; }
 [data-reading-list-columns] {
   display: grid; gap: .75em; padding-inline-start: 1.4em;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, max(8.5em, var(--reading-list-width))), 1fr));
