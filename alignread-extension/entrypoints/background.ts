@@ -1,6 +1,6 @@
 import { browser } from 'wxt/browser';
 import {
-  getSettings, hasProviderPermission, isDisabled, normalize, parseYoudaoCredentials, publicSettings, sameCredentials,
+  getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, publicSettings, sameCredentials,
   updateSettings, type Settings,
 } from '../src/background/settings/settings';
 import { google } from '../src/background/translation/google';
@@ -30,7 +30,9 @@ export default defineBackground(() => {
     let response: Promise<unknown> | undefined;
     if (sender.url === browser.runtime.getURL('/popup.html') && isTabId(message.tabId)) {
       const command = message as unknown as PopupMessage;
-      response = command.type === 'page' ? popup(command) : onTab(command.tabId, () => popup(command));
+      // Switching stops sessions via the same tab queue used by start and stop.
+      response = command.type === 'page' || command.type === 'switch-provider'
+        ? popup(command) : onTab(command.tabId, () => popup(command));
     } else if (sender.url === browser.runtime.getURL('/options.html')) {
       response = options(message as unknown as OptionsMessage);
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
@@ -101,6 +103,7 @@ async function updateProviderSettings(update: (current: Settings) => Settings) {
   let previousRevision: string | undefined;
   const saved = await updateSettings((current) => {
     const next = update(current);
+    if (next === current) return current;
     const sameGoogleKey = sameCredentials('google', current, next);
     const sameYoudaoKey = sameCredentials('youdao', current, next);
     next.checks = {
@@ -116,6 +119,16 @@ async function updateProviderSettings(update: (current: Settings) => Settings) {
   });
   if (previousRevision !== undefined) await stopSessions(({ revision }) => revision === previousRevision);
   return saved;
+}
+
+async function selectProvider(provider: unknown, configuredOnly = false) {
+  if (!isProviderId(provider)) return failure('unavailable');
+  let missingCredentials = false;
+  const settings = await updateProviderSettings((current) => {
+    missingCredentials = configuredOnly && !isConfigured(current, provider);
+    return missingCredentials || current.provider === provider ? current : { ...current, provider };
+  });
+  return missingCredentials ? failure('not-configured') : success(settings);
 }
 
 async function options(message: OptionsMessage) {
@@ -158,10 +171,8 @@ async function options(message: OptionsMessage) {
       return success(await publicSettings(settings));
     }
     case 'select-provider': {
-      const { provider } = message;
-      if (!isProviderId(provider)) return failure('unavailable');
-      const settings = await updateProviderSettings((current) => ({ ...current, provider }));
-      return success(await publicSettings(settings));
+      const selected = await selectProvider(message.provider);
+      return selected.ok ? success(await publicSettings(selected.value)) : selected;
     }
     case 'test-provider':
       return isProviderId(message.provider) ? testProvider(message.provider) : failure('unavailable');
@@ -191,7 +202,7 @@ async function options(message: OptionsMessage) {
 
 async function testProvider(provider: ProviderId) {
   const settings = await getSettings();
-  if (provider === 'google' ? !settings.key : !settings.youdao) return failure('not-configured');
+  if (!isConfigured(settings, provider)) return failure('not-configured');
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
 
   const item = { id: 'connection-test', text: 'Hello, world!' };
@@ -221,6 +232,11 @@ async function clearCaches(disable = false) {
 }
 
 async function popup(message: PopupMessage) {
+  if (message.type === 'switch-provider') {
+    const selected = await selectProvider(message.provider, true);
+    if (!selected.ok) return selected;
+    message = { type: 'page', tabId: message.tabId };
+  }
   const { tabId } = message;
   const tab = await browser.tabs.get(tabId);
   const settings = await getSettings();

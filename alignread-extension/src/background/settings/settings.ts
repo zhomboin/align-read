@@ -39,12 +39,17 @@ export async function publicSettings(settings: Settings): Promise<PublicSettings
     hasHostPermission('google'), hasHostPermission('youdao'),
   ]);
   return { ...preferences, providers: {
-    google: { configured: Boolean(key), consent: authorized, hostPermission: googlePermission,
+    google: { configured: isConfigured(settings, 'google'), consent: authorized, hostPermission: googlePermission,
       lastCheck: key ? checks.google ?? null : null },
-    youdao: { configured: youdao !== null, consent: youdaoAuthorized, hostPermission: youdaoPermission,
+    youdao: { configured: isConfigured(settings, 'youdao'), consent: youdaoAuthorized, hostPermission: youdaoPermission,
       lastCheck: youdao ? checks.youdao ?? null : null,
       appKeySuffix: youdao && youdao.appKey.length > 4 ? youdao.appKey.slice(-4) : undefined },
   } };
+}
+
+export function isConfigured(settings: Settings, provider: ProviderId) {
+  const configured: Record<ProviderId, boolean> = { google: Boolean(settings.key), youdao: settings.youdao !== null };
+  return configured[provider];
 }
 
 export async function hasProviderPermission(settings: Settings, provider: ProviderId) {

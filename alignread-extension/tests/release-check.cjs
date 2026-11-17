@@ -338,7 +338,7 @@ async function checkOptions() {
         result = permitted;
         if (result) message.origins.forEach(host => grants.add(host));
       } else {
-        const popup = ['page', 'selection-start', 'selection-stop'].includes(message.type);
+        const popup = ['page', 'switch-provider', 'start', 'control', 'selection-start', 'selection-stop'].includes(message.type);
         result = await request(message, popup ? 'popup' : 'options');
       }
       await send('Runtime.evaluate', {expression: 'completeRequest(' + id + ',' + JSON.stringify(result) + ')'}, sessionId);
