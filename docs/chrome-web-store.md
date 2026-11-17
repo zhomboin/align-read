@@ -57,8 +57,8 @@
 
    ```bash
    npm run zip
-   unzip -t .output/alignread-extension-0.1.4-chrome.zip
-   sha256sum .output/alignread-extension-0.1.4-chrome.zip
+   unzip -t .output/alignread-extension-0.1.5-chrome.zip
+   sha256sum .output/alignread-extension-0.1.5-chrome.zip
    ```
 2. 登录 Chrome 网上应用店开发者后台，确认开发者账户和两步验证已设置。首次发布点击 **Add new item → Choose file → Upload**。已有商店条目时进入原条目的 **Package → Upload New Package**，版本号须高于已发布版本。 [开发者后台](https://chrome.google.com/webstore/devconsole) · [首次上传](https://developer.chrome.com/docs/webstore/publish) · [更新条目](https://developer.chrome.com/docs/webstore/update)
 3. 填写 **Store listing** 和 **Privacy**，在 **Distribution** 选择地区和可见性。如需提供给审核员的测试步骤和凭据，填写 **Test instructions**。

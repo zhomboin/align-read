@@ -55,7 +55,7 @@ alignread-extension/
 | Service Worker | 接收扩展操作、执行注入、管理授权和设置、核验来自页面的请求、执行 Provider 批次并统一限流。 |
 | Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在各自会话内存。 |
 
-双栏和选词脚本均由 Worker 用 `chrome.scripting.executeScript` 按需注入。同一文档重复注入时复用已有入口。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
+双栏和选词脚本均由 Worker 用 `chrome.scripting.executeScript` 按需注入。状态查询没有回复或发送失败时，注入对应脚本。同一文档内已加载的脚本可复用。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
 
 ## 3. 双栏与段落映射
 
@@ -89,7 +89,7 @@ alignread-extension/
 
 Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、`error`。无活动会话时显示原文。暂停停止派发后续批次，在途批次可完成。关闭立即阻止迟到结果应用，Worker 中断或请求失败的批次可重试。
 
-选词脚本过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，界面和会话各自清理。选词译文仅保留在当前卡片内存。
+选词脚本过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，卡片在双栏之上显示。界面和会话各自清理，选词译文仅保留在当前卡片内存。
 
 ## 5. Provider、缓存与权限
 

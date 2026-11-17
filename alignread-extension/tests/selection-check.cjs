@@ -22,6 +22,32 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   assert.deepEqual(await start(), {ok: false, error: 'consent-required'});
   grants.add(youdaoOrigin);
 
+  const kinds = {start: '/reader.js', 'selection-start': '/selection.js'};
+  await Promise.all([['start', 'selection-start'], ['selection-start', 'start']].map(async (order, index) => {
+    const orderTabId = 40 + index;
+    const orderTab = {url: 'https://selection.example.test/guide', documentId: `coexist-${index}`};
+    tabs.set(orderTabId, orderTab);
+    const command = (type, details) => request({type, tabId: orderTabId, ...details}, 'popup');
+    for (const type of order) {
+      const result = await command(type, options);
+      assert.equal(result?.ok, true, `${order.join(' then ')}: ${type} should start`);
+    }
+    const expected = order.map(type => kinds[type]);
+    assert.deepEqual(orderTab.scripts, expected);
+    const both = (await command('page')).value;
+    assert.equal(both.reader?.status, 'preparing');
+    assert.equal(both.selectionEnabled, true);
+
+    await command('control', {command: 'stop'});
+    await command('selection-stop');
+    for (const type of order) assert.equal((await command(type, options)).ok, true);
+    assert.deepEqual(orderTab.scripts, expected, 'A loaded but idle script should not be injected again');
+    await command('control', {command: 'stop'});
+    await command('selection-stop');
+    tabs.delete(orderTabId);
+  }));
+  console.log('Worker injected both content scripts in either startup order and reused idle scripts.');
+
   tab.url = 'https://selection.example.test/login';
   assert.deepEqual(await start(), {ok: false, error: 'sensitive-site'});
   assert((await start(true)).ok);
@@ -93,6 +119,7 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
       <h1>Reading guide</h1>
       <p id="source">A focused reader can review a build artifact without losing context.</p>
       <p id="second">Another phrase to translate independently.</p>
+      <p id="right-edge" style="text-align: right">Phrase near the original pane edge</p>
       <p id="empty"> &nbsp; </p>
       <p id="oversized">${'large selection '.repeat(70)}</p>
       <textarea id="private">Do not send me</textarea>
@@ -203,6 +230,24 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   await until(() => visible('copy'));
   assert.equal(await content('result'), '译 focused reader');
   assert.equal(await evaluate('getSelection().toString()'), 'focused reader');
+  await pick('right-edge');
+  await until(() => visible('trigger'));
+  await click('trigger');
+  await until(() => visible('copy'));
+  const overlap = await evaluate(`(() => {
+    const reader = document.querySelector('[data-alignread-host]');
+    const {left, top, width, height} = selectionShadow.querySelector('.copy').getBoundingClientRect();
+    const x = left + width / 2;
+    const y = top + height / 2;
+    return {overlapping: x > reader.getBoundingClientRect().left,
+      clickable: document.elementFromPoint(x, y)?.hasAttribute('data-alignread-selection')};
+  })()`);
+  assert.deepEqual(overlap, {overlapping: true, clickable: true});
+  await click('copy');
+  await until(async () => (await content('status')) === '已复制');
+  assert.equal(await evaluate('copiedSelection'), '译 Phrase near the original pane edge');
+  await click('close');
+  await until(() => visible('trigger'));
   await evaluate('readerCommand({type:"reader:stop"})');
   assert.equal(await command('selection:state'), 'first');
   await evaluate('location.hash = "next"');
