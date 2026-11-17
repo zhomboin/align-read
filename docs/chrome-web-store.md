@@ -6,12 +6,13 @@
 
 宣传素材可分别上传到「小型宣传图块」和「顶部宣传图块」。 [440×280 小型宣传图 PNG](store/promo-small.png) · [1400×560 顶部宣传图 JPEG](store/promo-marquee.jpg)
 
-商品详情的「屏幕截图」可以按下列顺序上传。四张均为 1280×800 的 24 位 PNG，取自实际安装的生产扩展，使用本地演示文章和预设译文。发布验收步骤见 [测试与验收](test-plan.md)。
+商品详情的「屏幕截图」可以按下列顺序上传。五张均为 1280×800 的 24 位 PNG，使用当前源码的生产构建截图。阅读画面使用本地演示文章和预设译文。上传前核对送审包包含图中展示的选词翻译和新版服务设置。 [商店图片要求](https://developer.chrome.com/docs/webstore/images)
 
 1. [双栏对照阅读](store/dual-pane.png)
 2. [点击译文定位并高亮原文](store/paragraph-highlight.png)
 3. [技术文档的代码块和表格](store/technical-document.png)
-4. [调整栏宽后的阅读布局](store/adjustable-layout.png)
+4. [调整栏宽并在原文中使用选词翻译](store/adjustable-layout.png)
+5. [翻译服务设置](store/translation-settings.png)
 
 **详细描述**
 
@@ -42,7 +43,21 @@
 
 **数据类型与用途**按实际行为申报「网站内容」和「身份验证信息」。网站内容是用户主动送译的可见文本。身份验证信息是用户填写的服务凭据，用于本机配置与已授权的服务请求。Google 和 AI 的 API 密钥仅用于各自的服务请求。有道应用密钥保存在本机，用于签名。查看完整处理方式后，由发布者勾选数据使用承诺。 [隐私申报说明](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy)
 
-**隐私政策网址**填写 [隐私政策](privacy-policy.md) 发布后的公开 HTTPS 地址。发布后用未登录窗口打开该地址，确认页面正文可以访问。
+**隐私政策网址**填写部署并验证后的 [公开隐私政策页面](https://align-read.zhomboin.com/privacy-policy.html)。申报、商店描述和审核测试说明应与送审包一致。 [隐私政策正文](privacy-policy.md)
+
+## 发布隐私政策页面
+
+1. 在域名管理中将 `align-read.zhomboin.com` 解析到公网服务器。在 Nginx 的 HTTPS 站点中为该域名设置静态文件根目录，证书需覆盖该域名。 [Nginx HTTPS 配置](https://nginx.org/en/docs/http/configuring_https_servers.html)
+2. 将 [AlignRead 隐私政策 HTML](store/privacy-policy.html) 上传到该站点的静态文件根目录，保留文件名 `privacy-policy.html`。如果调整了 Nginx 配置，在服务器上执行 `sudo nginx -t`，检查通过后执行 `sudo systemctl reload nginx`。
+3. 在 Chrome 无痕窗口打开最终网址，确认无需登录即可看到「AlignRead 隐私政策」完整正文及适用版本 0.1.6。在 WSL 中运行下列命令，核对响应为 `200`、内容类型为 `text/html`。
+
+   ```bash
+   curl --fail --silent --show-error --location --max-time 20 --output /dev/null \
+     --write-out '%{http_code} %{content_type}\n%{url_effective}\n' \
+     'https://align-read.zhomboin.com/privacy-policy.html'
+   ```
+
+4. 在原商品的 **Privacy → Privacy policy URL** 填写并保存这个 HTTPS 网址。随后上传与政策正文匹配的 ZIP 和截图。 [Google 隐私申报说明](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy) · [拒审排查](https://developer.chrome.com/docs/webstore/troubleshooting)
 
 ## 审核测试说明
 
@@ -58,8 +73,8 @@
 
    ```bash
    npm run zip
-   unzip -t .output/alignread-extension-0.1.5-chrome.zip
-   sha256sum .output/alignread-extension-0.1.5-chrome.zip
+   unzip -t .output/alignread-extension-0.1.6-chrome.zip
+   sha256sum .output/alignread-extension-0.1.6-chrome.zip
    ```
 2. 登录 Chrome 网上应用店开发者后台，确认开发者账户和两步验证已设置。首次发布点击 **Add new item → Choose file → Upload**。已有商店条目时进入原条目的 **Package → Upload New Package**，版本号须高于已发布版本。 [开发者后台](https://chrome.google.com/webstore/devconsole) · [首次上传](https://developer.chrome.com/docs/webstore/publish) · [更新条目](https://developer.chrome.com/docs/webstore/update)
 3. 填写 **Store listing** 和 **Privacy**，在 **Distribution** 选择地区和可见性。如需提供给审核员的测试步骤和凭据，填写 **Test instructions**。
