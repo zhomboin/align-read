@@ -100,7 +100,7 @@ export type PopupMessage =
   | { type: 'control'; tabId: number; command: 'pause' | 'resume' | 'stop' };
 export type OptionsMessage =
   | { type: 'settings' }
-  | { type: 'save'; preferences: Omit<Preferences, 'authorized'> }
+  | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
   | { type: 'save-youdao'; credentials?: YoudaoCredentials | null; authorized: boolean }
   | { type: 'test-provider'; provider: ProviderId }

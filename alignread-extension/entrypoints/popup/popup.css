@@ -1,17 +1,31 @@
-:root { color-scheme: light; }
-body { margin: 0; min-width: 314px; color: #21332b; background: #faf9f6; font: 13px system-ui, sans-serif; }
-main { padding: 15px; }
-header, .actions { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
-h1 { margin: 0; font-size: 19px; }
-button, select { font: inherit; color: inherit; border-radius: 5px; padding: 6px 8px; border: 1px solid #bfc9c0; background: #fff; }
-button { cursor: pointer; }
-button:disabled { opacity: .55; cursor: default; }
-button.primary { color: #fff; border-color: #285946; background: #285946; }
-.language-fields { border: 0; padding: 0; margin: 13px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.language-fields label { display: grid; gap: 4px; }
-.language-fields .full { grid-column: 1 / -1; }
-.sensitive { display: flex; align-items: start; gap: 3px; margin-block: 8px; color: #754620; }
-.notice { max-width: 284px; margin: 8px 0; line-height: 1.5; }
-.actions { justify-content: start; margin-top: 12px; }
-.selection-actions { border-top: 1px solid #dce2d9; padding-top: 10px; }
-.selection-consent { max-width: 284px; margin: 6px 0 0; color: #425f51; font-size: 12px; }
+body {
+  inline-size: 400px;
+  max-inline-size: 100vw;
+  font-size: 14px;
+}
+
+main { padding: clamp(13px, 4.5vw, 20px); }
+header, .brand { display: flex; align-items: center; gap: 10px; }
+header { justify-content: space-between; }
+.brand img { flex: none; border-radius: 7px; }
+h1 { font-size: 22px; line-height: 1.2; }
+header button { min-block-size: 36px; padding: 6px 12px; }
+
+.provider-name { margin-block: 12px 5px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.language-fields { margin-block: 14px; gap: 10px; }
+.sensitive { margin-block: 12px; color: #744822; }
+
+.notice {
+  margin-block: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--surface-inset);
+  box-shadow: var(--inset);
+}
+
+.actions { margin-block-start: 12px; }
+.actions .primary { flex: 1 1 auto; }
+.selection-actions { border-block-start: 1px solid var(--edge); padding-block-start: 12px; }
+.selection-actions button { inline-size: 100%; }
+.selection-consent { margin-block-start: 7px; color: var(--muted); font-size: 12px; }
