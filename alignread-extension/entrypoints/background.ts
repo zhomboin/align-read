@@ -5,6 +5,7 @@ import {
 } from '../src/background/settings/settings';
 import { ai } from '../src/background/translation/ai';
 import { google } from '../src/background/translation/google';
+import { MINIMAX_RESPONSE_TIMEOUT_MS } from '../src/background/translation/minimax-stream';
 import type { TranslationBatch } from '../src/background/translation/provider';
 import { youdao } from '../src/background/translation/youdao';
 import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
@@ -239,7 +240,8 @@ async function testProvider(provider: ProviderId) {
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
 
   const item = { id: 'connection-test', text: 'Hello, world!' };
-  const signal = AbortSignal.timeout(isAiProviderId(provider) ? 28_000 : 22_000);
+  const testTimeout = provider === 'minimax' ? MINIMAX_RESPONSE_TIMEOUT_MS + 3_000 : isAiProviderId(provider) ? 28_000 : 22_000;
+  const signal = AbortSignal.timeout(testTimeout);
   const result = await translateWithProvider(provider, settings, {
     id: item.id, items: [item], source: 'en', target: 'zh-CN', range: 'visible',
   }, signal);

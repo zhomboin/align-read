@@ -8,6 +8,49 @@ const deepseek = { endpoint: 'https://api.deepseek.com/chat/completions', model:
 const minimax = { endpoint: 'https://api.minimax.cn/v1/chat/completions', model: 'MiniMax-M3.1-Flash', apiKey: 'sample-minimax-key' };
 const minimaxGlobal = 'https://api.minimax.io/v1/chat/completions';
 const permissionFor = (endpoint) => new URL(endpoint).origin + '/*';
+const timedStreams = new Set(['slow-stream', 'stalled-stream', 'continuous-stream', 'connect-stalled']);
+
+function streamedResponse({signal}, content, mode) {
+  const data = (value) => Buffer.from(`data: ${JSON.stringify(value)}\r\n\r\n`);
+  const frame = (delta, finish_reason = null) => data({choices: [{delta, finish_reason}]});
+  const reasoning = Buffer.concat([Buffer.from(': keep-alive\r\n\r\n'), frame({reasoning_content: 'Reasoning only'})]);
+  const answer = frame({content});
+  const split = answer.indexOf(Buffer.from('译')) + 1;
+  const chunks = [reasoning, answer.subarray(0, split), answer.subarray(split)];
+  if (mode === 'stalled-stream' || mode === 'continuous-stream') chunks.splice(1);
+  else if (mode === 'stream-provider-timeout') chunks.push(data({base_resp: {status_code: 2066}}));
+  else if (mode !== 'truncated-stream') chunks.push(frame({}, mode === 'length-stream' ? 'length' : 'stop'));
+
+  let stop;
+  const body = new ReadableStream({
+    start(controller) {
+      let timer;
+      function abort() {
+        stop();
+        controller.error(signal.reason);
+      }
+      stop = () => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+      };
+      if (signal.aborted) return abort();
+      signal.addEventListener('abort', abort, {once: true});
+      function send() {
+        const chunk = chunks.shift() ?? (mode === 'continuous-stream' ? reasoning : undefined);
+        if (chunk) {
+          controller.enqueue(chunk);
+          timer = setTimeout(send, timedStreams.has(mode) ? 100 : 0);
+        } else if (mode !== 'stalled-stream') {
+          stop();
+          controller.close();
+        }
+      }
+      timer = setTimeout(send, timedStreams.has(mode) ? 100 : 0);
+    },
+    cancel() { stop(); },
+  });
+  return new Response(body, {headers: {'Content-Type': 'text/event-stream; charset=utf-8'}});
+}
 
 async function aiResponse(options, mode, url) {
   const body = JSON.parse(options.body);
@@ -16,7 +59,7 @@ async function aiResponse(options, mode, url) {
   if (mode === 'auth') return new Response(null, {status: 401});
   if (mode === 'rate-limit') return new Response(null, {status: 429});
   if (mode === 'missing') return new Response(null, {status: 404});
-  if (mode === 'blocked') {
+  if (mode === 'blocked' || mode === 'connect-stalled') {
     const {signal} = options;
     signal.throwIfAborted();
     await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), {once: true}));
@@ -26,6 +69,7 @@ async function aiResponse(options, mode, url) {
   if (mode === 'unknown') rows[0].index = items.length;
   if (mode === 'incomplete') rows.pop();
   const plain = JSON.stringify({items: rows});
+  if (url.includes('minimax.') && mode !== 'json-response') return streamedResponse(options, plain, mode);
   return Response.json({choices: [{finish_reason: 'stop', message: {
     content: url === deepseek.endpoint ? plain : '```json\n' + plain + '\n```',
     ...(url.includes('minimax.') && {reasoning_content: 'Separate reasoning field'}),
@@ -128,7 +172,7 @@ async function checkAiWorker({request, dispatch, settings, tabs, grants, session
   console.log('AI translation passed setup, credentials, permissions, connection, reader, selection, and response validation.');
 }
 
-async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, session, calls, setResponse}) {
+async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, session, calls, setResponse, streamState}) {
   const save = (provider, config) => request({type: 'save-ai', provider, config, authorized: true});
   const test = (provider) => request({type: 'test-provider', provider});
   const services = {deepseek, minimax};
@@ -150,10 +194,12 @@ async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, s
     assert.equal(call.options.headers.Authorization, 'Bearer ' + apiKey);
     assert.equal(body.model, model);
     if (provider === 'deepseek') {
+      assert.equal(body.stream, false);
       assert.deepEqual(body.response_format, {type: 'json_object'});
       assert.deepEqual(body.thinking, {type: 'disabled'});
       assert.equal(body.reasoning_split, undefined);
     } else {
+      assert.equal(body.stream, true);
       assert.equal(body.reasoning_split, true);
       assert.equal(body.reasoning_effort, 'low');
       assert.equal(body.response_format, undefined);
@@ -178,6 +224,19 @@ async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, s
   assert((await save('minimax', {...minimax, endpoint: minimaxGlobal, apiKey: 'sample-global-key'})).ok);
   assert(!grants.has(permissionFor(minimax.endpoint)));
   assert.equal((await test('minimax')).value.providers.minimax.lastCheck.error, undefined);
+  const before = streamState().heartbeats;
+  for (const [mode, error] of [
+    ['slow-stream', undefined], ['connect-stalled', 'ai-connect-timeout'],
+    ['stalled-stream', 'timeout'], ['continuous-stream', 'timeout'],
+    ['truncated-stream', 'invalid-response'], ['length-stream', 'invalid-response'], ['stream-provider-timeout', 'timeout'],
+    ['json-response', undefined],
+  ]) {
+    setResponse(mode);
+    assert.equal((await test('minimax')).value.providers.minimax.lastCheck.error, error, mode);
+    assert.equal(streamState().active, 0, mode);
+  }
+  assert(streamState().heartbeats > before);
+  setResponse('success');
   const view = await settings();
   assert.equal(view.aiServices.minimax.endpoint, minimaxGlobal);
   assert.equal(view.aiServices.deepseek.endpoint, deepseek.endpoint);
@@ -186,7 +245,7 @@ async function checkNamedAiWorkers({request, dispatch, settings, tabs, grants, s
   assert(view.providers.deepseek.hostPermission);
   await request({type: 'reset'});
   assert(!grants.has(permissionFor(deepseek.endpoint)) && !grants.has(permissionFor(minimaxGlobal)));
-  console.log('DeepSeek and MiniMax passed official request formats, isolated keys, MiniMax error codes and region changes.');
+  console.log('DeepSeek and MiniMax passed request formats, isolated keys, region changes, slow streams and both timeout limits.');
 }
 
-module.exports = {aiResponse, checkAiWorker, checkNamedAiWorkers, config, host, deepseek, minimax, minimaxGlobal};
+module.exports = {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams, config, host, deepseek, minimax, minimaxGlobal};
