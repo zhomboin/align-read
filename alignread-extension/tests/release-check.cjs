@@ -39,7 +39,6 @@ let listener;
 let response = 'success';
 let blocked;
 let permitted = false;
-let injects = 0;
 function startWorker() {
   const chrome = {
     runtime: {
@@ -56,8 +55,11 @@ function startWorker() {
       async get(id) { return tabs.get(id) ?? {url: 'https://docs.example.test/start', documentId: 'doc'}; },
       async sendMessage(id, message, target) {
         const tab = tabs.get(id);
-        if (message.type.startsWith('selection:')) {
-          if (!tab?.selectionInjected || tab.documentId !== target.documentId) throw Error('No selection script');
+        const kind = message.type.split(':')[0];
+        if (target.documentId && target.documentId !== tab?.documentId) throw Error('Document changed');
+        if (!tab?.scripts?.length) throw Error('No listener in document');
+        if (!tab.scripts.includes(`/${kind}.js`)) return undefined;
+        if (kind === 'selection') {
           if (message.type === 'selection:state') return tab.selectionId ?? null;
           if (message.type === 'selection:start') {
             tab.selectionId = message.session.id;
@@ -66,8 +68,13 @@ function startWorker() {
           delete tab.selectionId;
           return null;
         }
-        if (message.type !== 'reader:start') return null;
-        return tabs.has(id) ? {ok: true} : {ok: false, error: 'layout-start'};
+        if (message.type === 'reader:start') {
+          if (tab.layoutFailure) return {ok: false, error: 'layout-start'};
+          tab.readerState = {status: 'preparing', total: 0, done: 0, failed: 0};
+          return {ok: true, value: tab.readerState};
+        }
+        if (message.type === 'reader:stop') delete tab.readerState;
+        return tab.readerState ?? null;
       },
     },
     permissions: {
@@ -77,12 +84,11 @@ function startWorker() {
     },
     scripting: {
       async executeScript({target, files}) {
-        injects++;
         const tab = await chrome.tabs.get(target.tabId);
         if (tab.restricted) throw Error('scripting permission denied');
-        if (files?.includes('/selection.js')) {
+        if (files) {
           assert.deepEqual(Array.from(target.documentIds), [tab.documentId]);
-          tab.selectionInjected = true;
+          (tab.scripts ??= []).push(...files);
         }
         return [{documentId: tab.documentId, result: tab.url}];
       },
@@ -181,10 +187,11 @@ async function checkWorker() {
   assert.equal((await settings()).providers.google.lastCheck.error, undefined);
   await request({type: 'select-provider', provider: 'youdao'});
   const beforeLayout = calls.length;
+  tabs.set(1, {url: 'https://docs.example.test/start', documentId: 'doc', layoutFailure: true});
   assert.deepEqual(await request({type: 'start', tabId: 1, provider: 'youdao', options: {
     source: 'auto', target: 'zh-CN', range: 'visible',
   }}, 'popup'), {ok: false, error: 'layout-start'});
-  assert.equal(injects, 1);
+  assert.deepEqual(tabs.get(1).scripts, ['/reader.js']);
   assert.equal(calls.length, beforeLayout);
   await saveYoudao(null, false);
   assert(!(await settings()).providers.youdao.configured);

@@ -26,7 +26,8 @@ export function createSplit(
   const shadow = host.attachShadow({ mode: 'closed' });
   const container = document.createElement('div');
   shadow.append(container);
-  documentRoot.append(host);
+  // Both overlays share the same z-index, so keep an existing selection overlay above the reader.
+  documentRoot.insertBefore(host, documentRoot.querySelector(':scope > [data-alignread-selection]'));
 
   const sheet = new CSSStyleSheet();
   const content = createContentFit(sourceViewport);

@@ -285,9 +285,9 @@ async function popup(message: PopupMessage) {
   }
   if (!documentId) return failure('unsupported-page');
 
-  try {
-    await send(tabId, documentId, { type: `${kind}:state` });
-  } catch {
+  // A different content script may receive the message without replying.
+  const state = await send(tabId, documentId, { type: `${kind}:state` }).catch(() => undefined);
+  if (state === undefined) {
     await browser.scripting.executeScript({ target: { tabId, documentIds: [documentId] }, files: [`/${kind}.js`] });
   }
 
