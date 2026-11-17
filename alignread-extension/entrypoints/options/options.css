@@ -1,7 +1,4 @@
-body {
-  min-block-size: 100vh;
-  background: radial-gradient(ellipse at top left, #f4f8f5, transparent 52rem), var(--surface);
-}
+body { min-block-size: 100vh; }
 
 .settings-layout {
   display: grid;
@@ -41,7 +38,7 @@ body {
   border-radius: 50%;
 }
 
-.settings-nav a:hover { background: #e2ece6; color: var(--ink); }
+.settings-nav a:hover { background: var(--surface-hover); color: var(--ink); }
 .settings-nav a[aria-current] {
   border-color: var(--edge);
   background: var(--surface-inset);
@@ -67,38 +64,15 @@ body {
 
 .provider-select {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 330px);
-  align-items: center;
-  gap: 9px 18px;
-}
-.provider-select .feedback { grid-column: 1 / -1; }
-
-.provider-switch {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px 14px;
   margin-block-end: 22px;
-  border: 1px solid var(--edge);
-  border-radius: 13px;
-  background: var(--surface-inset);
-  box-shadow: var(--inset);
+  padding-block-end: 18px;
+  border-block-end: 1px solid var(--edge);
 }
-.provider-switch button {
-  min-block-size: 38px;
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-}
-.provider-switch button[aria-pressed="true"] {
-  border-color: var(--field-line);
-  background: var(--surface-raised);
-  box-shadow: 2px 2px 5px var(--shadow);
-  color: var(--ink);
-}
+.provider-select p { grid-column: 1 / -1; }
+.provider-select .hint { margin: 0; }
 
 .provider-layout {
   display: grid;
@@ -164,10 +138,11 @@ main > .feedback { margin-block-end: 12px; }
 
 @media (max-width: 470px) {
   .provider-select { grid-template-columns: minmax(0, 1fr); }
+  .set-current-provider { justify-self: start; }
   .reset { margin-inline-start: 0; }
 }
 
 @media (forced-colors: active) {
-  .settings-nav a[aria-current], .provider-switch button[aria-pressed="true"] { border-color: Highlight; }
+  .settings-nav a[aria-current] { border-color: Highlight; }
   .settings-nav a[aria-current]::before { background-color: Highlight; forced-color-adjust: none; }
 }
