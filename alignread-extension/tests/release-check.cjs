@@ -816,6 +816,7 @@ async function checkOptions() {
     clearTimeout(watchdog);
     child.kill();
     await stopped;
+    await fs.promises.rm(profile, {recursive: true, force: true, maxRetries: 5});
   }
 }
 
