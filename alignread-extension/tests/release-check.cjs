@@ -7,7 +7,7 @@ const {spawn} = require('node:child_process');
 const {setTimeout: wait} = require('node:timers/promises');
 const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
 const {checkSettings} = require('./settings-check.cjs');
-const {aiResponse, checkAiWorker, checkNamedAiWorkers} = require('./ai-check.cjs');
+const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
@@ -45,6 +45,10 @@ let permissionRemoved;
 let response = 'success';
 let blocked;
 let permitted = false;
+let heartbeats = 0;
+const activeIntervals = new Set();
+const streamState = () => ({heartbeats, active: activeIntervals.size});
+const testDelay = (ms) => timedStreams.has(response) ? Math.ceil(ms / 100) : ms;
 const setResponse = (value) => { response = value; };
 function revokePermission(host) {
   if (grants.delete(host)) permissionRemoved({origins: [host]});
@@ -54,6 +58,7 @@ function startWorker() {
     runtime: {
       id, getURL: (suffix) => origin + suffix,
       onMessage: { addListener(handler) { listener = handler; } },
+      async getPlatformInfo() { heartbeats++; return {}; },
     },
     storage: {
       local: { ...storage(local), async setAccessLevel(value) { assert.equal(value.accessLevel, 'TRUSTED_CONTEXTS'); } },
@@ -104,8 +109,15 @@ function startWorker() {
       },
     },
   };
-  const context = vm.createContext({chrome, crypto, URL, URLSearchParams, TextEncoder, AbortSignal, AbortController,
-    setTimeout, clearTimeout,
+  const context = vm.createContext({chrome, crypto, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController,
+    AbortSignal: {any: (signals) => AbortSignal.any(signals), timeout: (ms) => AbortSignal.timeout(testDelay(ms))},
+    setTimeout: (action, ms) => setTimeout(action, testDelay(ms)), clearTimeout,
+    setInterval(action, ms) {
+      const timer = setInterval(action, testDelay(ms)).unref();
+      activeIntervals.add(timer);
+      return timer;
+    },
+    clearInterval(timer) { activeIntervals.delete(timer); clearInterval(timer); },
     async fetch(url, options) {
       calls.push({url, options});
       if (blocked) await blocked.promise;
@@ -928,7 +940,7 @@ async function run() {
   if (selectionOnly || settingsOnly) startWorker();
   else await checkWorker();
   if (!selectionOnly) {
-    const aiWorker = {request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local};
+    const aiWorker = {request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local, streamState};
     await checkAiWorker(aiWorker);
     await checkNamedAiWorkers(aiWorker);
   }

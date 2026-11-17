@@ -7,7 +7,7 @@ type Part = { id: string; text: string; translated?: string; error?: ErrorCode }
 type Work = { block: Block; parts: Part[] };
 export type BlockStatus = 'pending' | 'failed' | 'done';
 const pauseOn = new Set<ErrorCode>(['authentication', 'quota', 'unsupported-language', 'rate-limit', 'ai-endpoint',
-  'consent-required', 'not-configured', 'stale', 'unavailable', 'network', 'timeout']);
+  'consent-required', 'not-configured', 'stale', 'unavailable', 'network', 'timeout', 'ai-connect-timeout']);
 
 export function createTranslation(blocks: Block[], session: Session, signal: AbortSignal, update: () => void) {
   const work = new Map<string, Work>();
