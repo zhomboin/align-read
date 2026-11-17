@@ -17,14 +17,19 @@ async function checkSettings({page, evaluate, until, manifest, request, local, s
   const editYoudao = () => evaluate(`Array.from(document.querySelectorAll('.provider-switch button')).find(button => button.textContent === '有道智云').click()`);
 
   await request({type: 'reset'});
-  await resize(500);
+  await resize(220);
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
   await until(() => evaluate('document.querySelector("header button")?.textContent === "设置"'));
-  assert.equal(await evaluate('document.body.getBoundingClientRect().width'), 400);
+  assert.equal(await evaluate('document.body.getBoundingClientRect().width'), 440);
+  await resize(440);
+  assert(await noOverflow());
+  assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('body, .language-fields select'),
+    (element) => getComputedStyle(element).backgroundColor)`), Array(4).fill('rgb(255, 255, 255)'));
+  assert(await evaluate(`document.querySelector('header button').getBoundingClientRect().height < 50`));
+  assert(await evaluate(`Array.from(document.querySelectorAll('.language-fields select'), (select) => select.offsetWidth)
+    .every((width) => width >= 190)`));
   await click('header button');
   assert.equal(await evaluate('openedOptions'), 1);
-  await resize(320);
-  assert(await noOverflow());
 
   await resize(1200);
   await page('Page.navigate', {url: 'http://alignread.test/options.html'});
