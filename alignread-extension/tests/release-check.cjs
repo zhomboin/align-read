@@ -9,6 +9,7 @@ const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require(
 const {checkSettings} = require('./settings-check.cjs');
 const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
 const {checkInlineRow} = require('./inline-row-check.cjs');
+const {checkAiPresets} = require('./ai-presets-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
@@ -820,6 +821,7 @@ async function checkBrowser() {
     clearTimeout(watchdog);
     child.kill();
     await stopped;
+    await fs.promises.rm(profile, {recursive: true, force: true, maxRetries: 5});
   }
 }
 
@@ -949,6 +951,7 @@ async function run() {
     const aiWorker = {request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local, streamState};
     await checkAiWorker(aiWorker);
     await checkNamedAiWorkers(aiWorker);
+    await checkAiPresets(aiWorker);
   }
   if (!settingsOnly) await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
   await checkBrowser();

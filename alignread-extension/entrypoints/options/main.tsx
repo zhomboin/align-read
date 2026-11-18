@@ -6,7 +6,7 @@ import { AI_PROVIDERS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, pars
 import { request } from '../../src/shared/extension';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
-  LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
+  LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
   type ProviderId, type ProviderStatus, type PublicSettings, type ReadingOptions, type YoudaoCredentials,
 } from '../../src/shared/reader-messages';
 import { AiProviderForm, type AiDraft } from './ai-provider-form';
@@ -54,7 +54,7 @@ function Options() {
   const [editor, setEditor] = useState<ProviderId>();
   const [settings, setSettings] = useState<PublicSettings>({
     ...defaults, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
-    providers: { google: emptyStatus, youdao: emptyStatus, ai: emptyStatus, deepseek: emptyStatus, minimax: emptyStatus },
+    providers: Object.fromEntries(PROVIDER_IDS.map((provider) => [provider, emptyStatus])) as PublicSettings['providers'],
   });
   const [key, setKey] = useState('');
   const [erase, setErase] = useState(false);

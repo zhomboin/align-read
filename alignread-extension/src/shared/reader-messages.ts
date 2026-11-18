@@ -65,7 +65,7 @@ export const errors = {
   'unsupported-language': '翻译服务不支持此语言设置。',
   'rate-limit': '翻译服务请求过多，请稍后重试。',
   'timeout': '翻译请求超时，可重试失败段落。',
-  'ai-connect-timeout': '等待 MiniMax 首次响应超时，请检查网络或稍后重试。',
+  'ai-connect-timeout': '等待翻译服务首次响应超时，请检查网络或稍后重试。',
   'network': '无法连接翻译服务，请检查网络。',
   'invalid-response': '翻译服务返回了无法匹配的结果。',
   'ai-config': '请填写有效的 HTTPS Chat Completions 地址、模型和 API 密钥。',

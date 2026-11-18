@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const {config: aiConfig, host: aiHost, deepseek, minimax, minimaxGlobal} = require('./ai-check.cjs');
+const {presets} = require('./ai-presets-check.cjs');
 
 async function checkSettings({page, evaluate, until, manifest, request, local, grants, setPermission, setResponse}) {
   const resize = (width) => page('Emulation.setDeviceMetricsOverride', {width, height: 850, deviceScaleFactor: 1, mobile: false});
@@ -180,6 +181,26 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
   await until(() => statusIncludes('已保存'));
   assert.deepEqual([...grants], ['https://api.deepseek.com/*', 'https://api.minimax.io/*']);
+  for (const [provider, [endpoint, model]] of Object.entries(presets)) {
+    await editProvider(provider);
+    assert(await evaluate(`${providerForm}.querySelector('[name=endpoint]').readOnly`));
+    assert.equal(await evaluate(`${providerForm}.querySelector('[name=endpoint]').value`), endpoint);
+    assert.equal(await evaluate(`${providerForm}.querySelector('[name=model]').value`), model);
+    assert.equal(await evaluate(`${providerForm}.querySelector('input[type=password]').value`), '');
+  }
+  await editProvider('doubao');
+  await evaluate(`fill(${providerForm}.querySelector('[name=model]'), 'ep-example')`);
+  await evaluate(`fill(${providerForm}.querySelector('input[type=password]'), 'sample-doubao-ui-key')`);
+  await evaluate(`${providerForm}.querySelector('input[type=checkbox]').click()`);
+  await evaluate(`${providerForm}.querySelector('button[type=submit]').click()`);
+  await until(() => statusIncludes('已保存'));
+  assert(grants.has(new URL(presets.doubao[0]).origin + '/*'));
+  assert.equal(local.providerSettings.aiServices.doubao.model, 'ep-example');
+  await evaluate(`${testButton}.click()`);
+  await until(() => statusIncludes('通过'));
+  await click('.set-current-provider');
+  await until(() => currentProvider('豆包'));
+  assert.equal(local.providerSettings.provider, 'doubao');
   assert(await noOverflow());
   await request({type: 'reset'});
   console.log('Built settings passed popup entry, desktop and narrow layouts, permission and connection feedback, scoped saves, keyboard input, and reset.');

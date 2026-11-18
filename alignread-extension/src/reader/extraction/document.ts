@@ -211,6 +211,16 @@ export async function extractArticle(range: ReadingRange, signal: AbortSignal, s
     }
     if (items.length < 2 || !atomic) return undefined;
 
+    let previous: DOMRect | undefined;
+    for (const { element } of items) {
+      const rects = element.getClientRects();
+      const bounds = rects[0];
+      if (rects.length !== 1 || !bounds?.width || !bounds.height) return undefined;
+      if (previous && (!sameRow(previous, bounds) ||
+          (previous.right > bounds.left + 1 && bounds.right > previous.left + 1))) return undefined;
+      previous = bounds;
+    }
+
     const children: Block[] = [];
     for (const { element, style } of items) {
       const group: Run[] = [];

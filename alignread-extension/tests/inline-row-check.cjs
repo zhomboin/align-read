@@ -23,6 +23,9 @@ async function checkInlineRow({evaluate, until}) {
     aligned: true, centered: true, ordered: true, label: '译 News', background: 'rgb(0, 102, 204)',
     radius: '12px', separator: '|', link: 'https://example.com/course', color: 'rgb(8, 109, 195)',
   });
+  const stackedLinks = await evaluate(`Array.from(pane.querySelectorAll('a[href^="https://example.com/stacked/"]'),
+    link => link.closest('[data-reading-inline-row]') === null)`);
+  assert.deepEqual(stackedLinks, [true, true], 'Links on separate source lines should stay outside the inline group.');
   assert.equal(await evaluate('readerPayloads.flat().includes("|")'), false);
   assert.equal(await evaluate(`{
     pane.querySelector('[data-reading-inline-row] strong').click();
