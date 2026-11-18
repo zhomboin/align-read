@@ -6,13 +6,15 @@ const {setTimeout: wait} = require('node:timers/promises');
 const spaFixturePath = '/spa-fixture.html';
 const heldText = 'In-flight text from previous route';
 const queryHeldText = 'In-flight text before query change';
+const overviewPendingText = 'In-flight overview paragraph';
+const persistentPendingText = 'In-flight paragraph shared by both panels';
 
 async function checkSpaBrowser({page, evaluate, until, build}) {
   const fixtureUrl = 'http://alignread.test' + spaFixturePath;
   await page('Page.navigate', {url: fixtureUrl});
   await until(() => evaluate(`location.href === ${JSON.stringify(fixtureUrl)} && !!document.querySelector('#anchor')`));
   await page('Emulation.setDeviceMetricsOverride', {width: 1440, height: 900, deviceScaleFactor: 1, mobile: false});
-  await evaluate(`(${initSpaReader})(${JSON.stringify([heldText, queryHeldText])})`);
+  await evaluate(`(${initSpaReader})(${JSON.stringify([heldText, queryHeldText, overviewPendingText])})`);
   await evaluate(fs.readFileSync(path.join(build, 'reader.js'), 'utf8'));
 
   const command = (type) => evaluate(`readerCommand({type:'reader:${type}'})`);
@@ -40,11 +42,19 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   await clearMessages();
   await evaluate(`document.querySelector('a[href="#overview"]').click()`);
   await until(() => evaluate(`location.hash === '#overview'`));
-  await evaluate(`document.querySelector('a[href="#learn"]').click()`);
+  await evaluate(`{
+    const learn = document.querySelector('a[href="#learn"]');
+    learn.addEventListener('click', () => {
+      originalSpaHost.remove();
+      document.adoptedStyleSheets = [];
+    }, {once: true});
+    learn.click();
+  }`);
   await until(() => evaluate(`location.hash === '#learn'`));
   await until(() => translated('Learn tab guide'));
   await ready();
   await assertSameSplit();
+  assert(await evaluate('document.adoptedStyleSheets.length > 0'));
   assert(await translated('Unchanged introduction'));
   assert.equal(await translated('Overview tab content'), false);
   assert.deepEqual((await messages()).sort(), ['Learn tab guide', 'Learning resources']);
@@ -53,6 +63,36 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
     CSS.highlights.get('alignread-paragraph')?.values().next().value?.startContainer.parentElement.id;
   }`);
   assert.equal(learnSource, 'learn-guide');
+
+  await evaluate(`document.querySelector('a[href="#overview"]').click()`);
+  await until(() => translated('Overview tab content'));
+  await ready();
+  await clearMessages();
+  await evaluate(`{
+    document.querySelector('#anchor').insertAdjacentHTML('afterend', '<p id="pending-common">${persistentPendingText}</p>');
+    document.querySelector('#overview').insertAdjacentHTML('beforeend', '<p id="pending-overview">${overviewPendingText}</p>');
+  }`);
+  const oldOverviewBatch = await findBatch(overviewPendingText);
+  assert.deepEqual(oldOverviewBatch.items.map(({text}) => text).sort(), [overviewPendingText, persistentPendingText].sort());
+  await clearMessages();
+  await evaluate(`document.querySelector('a[href="#learn"]').click()`);
+  await cancelled(oldOverviewBatch.batchId);
+  await until(() => translated('Learn tab guide'));
+  await ready();
+  await assertSameSplit();
+  assert(await translated(persistentPendingText));
+  assert.deepEqual((await messages()).sort(), ['Learn tab guide', 'Learning resources', persistentPendingText].sort());
+  await release(oldOverviewBatch.batchId);
+  await evaluate('new Promise(resolve => setTimeout(resolve, 0))');
+  assert.equal(await evaluate(`spaPane.querySelector('article').textContent.includes('过期 ')`), false);
+  assert(await translated(persistentPendingText));
+  assert(await translated('Learn tab guide'));
+  await evaluate(`{
+    document.querySelector('#pending-overview').remove();
+    document.querySelector('#pending-common').remove();
+  }`);
+  await until(async () => !(await translated(persistentPendingText)));
+
   await clearMessages();
   await evaluate(`{
     document.querySelector('#editable-text').firstChild.data = 'Updated paragraph';
@@ -209,11 +249,20 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
     document.querySelector('#view').textContent = 'Safe article before replacing the body';`);
   assert((await start('visible', fixtureUrl)).ok);
   await ready();
+  await evaluate('globalThis.originalSpaHost = spaPane.host');
   await clearMessages();
   await evaluate(`document.body.replaceWith(Object.assign(document.createElement('body'), {textContent: 'Replacement body'}));`);
-  await until(async () => (await command('state'))?.error === 'incompatible');
+  await until(() => translated('Replacement body'));
+  await ready();
+  await assertSameSplit();
+  assert.equal(await translated('Safe article before replacing the body'), false);
+  assert.deepEqual(await messages(), ['Replacement body']);
+  await command('stop');
+  assert.equal(await command('state'), null);
+  assert.equal(await evaluate(`document.querySelectorAll('[data-alignread-host]').length`), 0);
   assert.equal(await evaluate('document.adoptedStyleSheets.length'), 0);
-  assert.deepEqual(await messages(), []);
+  assert(await evaluate(`getComputedStyle(document.body).position === 'static' &&
+    document.body.getBoundingClientRect().width > innerWidth * .9`));
   console.log('SPA reader retained unchanged translations, updated live content and alignment, rejected late batches, and cleaned up.');
 }
 

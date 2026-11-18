@@ -54,7 +54,8 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
     }
 
     if (error && ![...activeParts].some((part) => part.error === error)) error = undefined;
-    if (inFlight && ![...inFlight.parts.values()].some((parts) => parts.some((part) => activeParts.has(part)))) {
+    // A batch that still references retired text cannot hold up the newly visible view.
+    if (inFlight && [...inFlight.parts.values()].some((parts) => parts.some((part) => !activeParts.has(part)))) {
       cancelInFlight();
     }
     held = false;

@@ -20,6 +20,7 @@ export type ActiveReader = {
 };
 
 const refreshDelay = 80;
+const layoutRecoveryTime = 400;
 
 let dismissNotice: (() => void) | undefined;
 
@@ -49,17 +50,19 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let waitForMutation = false;
   let revision = 0;
   let timer = 0;
+  let layoutBlockedAt: number | undefined;
+  let contextUnavailable = false;
   let extraction: AbortController | undefined;
   let scroll: HTMLElement | null = null;
   let highlighted: HTMLElement | undefined;
   const targets = new Map<string, HTMLElement>();
-  const split = createSplit(() => ratio, close);
+  const split = createSplit(() => ratio, layoutChanged);
   const stylesheet = new CSSStyleSheet();
   stylesheet.replaceSync(css);
   split.shadow.adoptedStyleSheets = [stylesheet];
   split.container.style.height = '100%';
   const root = createRoot(split.container);
-  const flushChanges = watchSourceChanges(split.sourceViewport, () => article?.scope,
+  const flushChanges = watchSourceChanges(() => split.sourceViewport, () => article?.scope,
     lifecycle.signal, checkPage, sourceChanged);
 
   function state(): ReaderState {
@@ -142,16 +145,15 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
 
   function checkPage(): boolean {
     if (lifecycle.signal.aborted) return false;
-    if (split.sourceViewport !== document.body || !split.container.isConnected) {
-      close('incompatible');
-      return false;
-    }
     const page = readReaderPage(location.href);
     const nextKey = page?.key ?? location.href.split('#', 1)[0]!;
     const fragmentChanged = pageHash !== location.hash;
     pageHash = location.hash;
     if (nextKey === pageKey) {
-      if (fragmentChanged) sourceChanged();
+      const restored = split.restoreContext();
+      const unavailable = split.sourceViewport !== document.body || !split.container.isConnected;
+      if (fragmentChanged || restored || unavailable !== contextUnavailable) sourceChanged();
+      contextUnavailable = unavailable;
       return true;
     }
     if (!page || page.origin !== initialPage?.origin) {
@@ -194,6 +196,14 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
     scheduleRefresh();
   }
 
+  function layoutChanged(error: 'narrow' | 'incompatible') {
+    if (error === 'narrow') {
+      close(error);
+      return;
+    }
+    sourceChanged();
+  }
+
   function scheduleRefresh(delay = refreshDelay) {
     if (timer || extraction || waitForMutation || lifecycle.signal.aborted) return;
     timer = window.setTimeout(() => {
@@ -209,9 +219,17 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
     const controller = new AbortController();
     extraction = controller;
     try {
+      split.restoreContext();
       if (!initialLayout) {
         const layoutError = split.checkGeometry();
-        if (layoutError) { close(layoutError); return; }
+        if (layoutError) {
+          const now = performance.now();
+          layoutBlockedAt ??= now;
+          if (layoutError === 'narrow' || now - layoutBlockedAt >= layoutRecoveryTime) close(layoutError);
+          else sourceChanged();
+          return;
+        }
+        layoutBlockedAt = undefined;
         split.refreshSidebar();
       }
       const result = await extractArticle(session.range, controller.signal, split.sidebar, (node) => {

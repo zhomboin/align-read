@@ -15,7 +15,7 @@ const fittedStyles = new Set([
 ]);
 
 export function watchSourceChanges(
-  body: HTMLElement,
+  body: () => HTMLElement,
   scope: () => HTMLElement | undefined,
   signal: AbortSignal,
   checkPage: () => boolean,
@@ -25,7 +25,7 @@ export function watchSourceChanges(
   function meaningful(record: MutationRecord) {
     const element = record.target instanceof Element ? record.target : record.target.parentElement;
     if (!element || element.closest(extensionUi) || element.closest(ignored)) return false;
-    if (element !== document.documentElement && !body.contains(element)) return false;
+    if (element !== document.documentElement && !body().contains(element)) return false;
     const current = scope();
     if (current?.isConnected && !current.contains(element) && !element.contains(current)) {
       const candidates = record.type === 'attributes' ? [element] : Array.from(record.addedNodes);
