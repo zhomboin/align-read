@@ -13,7 +13,7 @@ export function createSplit(
   onUnsafe: (why: 'narrow' | 'incompatible') => void,
 ) {
   const sourceViewport = document.body;
-  const sidebar = findSidebarLayout(sourceViewport);
+  let sidebar = findSidebarLayout(sourceViewport);
   const documentRoot = document.documentElement;
   const host = document.createElement('div');
   host.setAttribute('data-alignread-host', '');
@@ -94,7 +94,17 @@ export function createSplit(
   document.addEventListener('fullscreenchange', resize);
 
   return {
-    container, shadow, sourceViewport, sidebar,
+    container, shadow, sourceViewport,
+    get sidebar() { return sidebar; },
+    refreshSidebar() {
+      if (sidebar && sourceViewport.contains(sidebar.row) && sidebar.row.contains(sidebar.sidebarBranch) &&
+          sidebar.row.contains(sidebar.content) && sidebar.sidebarBranch.contains(sidebar.sidebar) &&
+          sidebar.content.contains(sidebar.heading) && sidebar.heading.getBoundingClientRect().width &&
+          sidebar.sidebar.getBoundingClientRect().width && getComputedStyle(sidebar.sidebar).visibility === 'visible') return;
+      const previous = sidebar;
+      sidebar = findSidebarLayout(sourceViewport);
+      if (active && (previous || sidebar)) content.fit(sidebar);
+    },
     activate() {
       if (viewportWidth() < MIN_WIDTH) return 'narrow' as const;
       if (document.fullscreenElement || sourceViewport !== document.body) return 'incompatible' as const;
@@ -122,6 +132,7 @@ export function createSplit(
     drag() {
       if (active) position();
     },
+    checkGeometry: verify,
     verify: adjust,
     close() {
       window.removeEventListener('resize', resize);
@@ -134,8 +145,10 @@ export function createSplit(
         const { windowX, windowY, bodyX, bodyY, bodyScrolls } = originalScroll;
         const returnToBody = active && bodyScrolls;
         const returnToWindow = active && !bodyScrolls;
-        sourceViewport.scrollTo({ left: returnToBody ? scrollLeft : bodyX, top: returnToBody ? scrollTop : bodyY, behavior: 'instant' });
-        window.scrollTo({ left: returnToWindow ? scrollLeft : windowX, top: returnToWindow ? scrollTop : windowY, behavior: 'instant' });
+        if (document.body === sourceViewport) {
+          sourceViewport.scrollTo({ left: returnToBody ? scrollLeft : bodyX, top: returnToBody ? scrollTop : bodyY, behavior: 'instant' });
+          window.scrollTo({ left: returnToWindow ? scrollLeft : windowX, top: returnToWindow ? scrollTop : windowY, behavior: 'instant' });
+        }
       }
       host.remove();
     },

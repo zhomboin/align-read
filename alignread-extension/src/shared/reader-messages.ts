@@ -85,6 +85,7 @@ export const failure = (error: ErrorCode): Failure => ({ ok: false, error });
 
 export type Session = ReadingOptions & {
   id: string;
+  pageUrl?: string;
   ratio: number;
   syncScroll: boolean;
   highlight: boolean;
@@ -118,7 +119,8 @@ export type OptionsMessage =
   | { type: 'clear-cache' | 'cache-usage' }
   | { type: 'reset' };
 export type ReaderRequest =
-  | { type: 'batch'; sessionId: string; batchId: string; items: TranslationItem[] }
+  | { type: 'batch'; sessionId: string; batchId: string; items: TranslationItem[]; pageUrl?: string }
+  | { type: 'cancel'; sessionId: string; batchId: string }
   | { type: 'closed'; sessionId: string }
   | { type: 'resize'; sessionId: string; ratio: number };
 export type ReaderCommand =

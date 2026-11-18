@@ -47,6 +47,8 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 验证结束后在启动测试服务的终端按 `Ctrl+C`。自动化回归命令见 [发布验收](test-plan.md#运行)，打包和远程分发步骤见 [Chrome 网上应用店上架](chrome-web-store.md)。
 
+在开发环境验证 SPA 时，按 [SPA 验收](test-plan.md#spa-验收) 检查页面内更新、站内换页及原页恢复。
+
 ## 提交与回归
 
 从最新的 `main` 创建开发分支。修改设置界面时，在扩展目录执行下面的定向检查。若浏览器不在 PATH，按 [测试计划](test-plan.md#运行) 设置 `CHROMIUM_BIN`。
@@ -71,6 +73,14 @@ npm run test:selection
 npm run check
 npm run build
 npm run test:layout
+```
+
+修改 SPA 路由、动态提取或后台页面授权时，在扩展目录检查类型、构建并运行 SPA 定向测试。
+
+```bash
+npm run check
+npm run build
+npm run test:spa
 ```
 
 推送开发分支并向 `main` 发起 PR。检查 PR 的 **AlignRead regression** 结果，完成代码检视后再合入。全量回归和 ZIP 完整性检查由 GitHub Actions 执行。

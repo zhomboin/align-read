@@ -5,35 +5,60 @@ import type { Block } from '../extraction/document';
 
 type Part = { id: string; text: string; translated?: string; error?: ErrorCode };
 type Work = { block: Block; parts: Part[] };
+type Batch = {
+  id: string; parts: Map<string, Part[]>; cacheEpoch: number; result?: Result<BatchResult> | null;
+};
 export type BlockStatus = 'pending' | 'failed' | 'done';
 const pauseOn = new Set<ErrorCode>(['authentication', 'quota', 'unsupported-language', 'rate-limit', 'ai-endpoint',
-  'consent-required', 'not-configured', 'stale', 'unavailable', 'network', 'timeout', 'ai-connect-timeout']);
+  'consent-required', 'not-configured', 'sensitive-site', 'stale', 'unavailable', 'network', 'timeout', 'ai-connect-timeout']);
+let batchNumber = 0;
 
-export function createTranslation(blocks: Block[], session: Session, signal: AbortSignal, update: () => void) {
+export function createTranslation(session: Session, signal: AbortSignal, update: () => void) {
   const work = new Map<string, Work>();
-  const texts = new Map<string, Part[]>();
   const cache = new Map<string, string>();
+  const activeParts = new Set<Part>();
+  let texts = new Map<string, Part[]>();
   let cacheEnabled = session.cache;
   let cacheBytes = 0;
   let cacheEpoch = 0;
   let paused = false;
-  let running = false;
-  let batchNumber = 0;
+  let held = true;
+  let canceling = false;
+  let timer = 0;
+  let pageUrl = '';
   let error: ErrorCode | undefined;
+  let inFlight: Batch | undefined;
 
-  for (const block of blocks) {
-    const parts: Part[] = [];
-    if (session.source !== session.target) {
-      for (const piece of block.pieces) {
-        if (!piece.translate || !piece.text.trim()) continue;
-        const chunks = splitText(piece.text.trim()).map((text, index) => ({ id: piece.id + '-' + index, text }));
-        parts.push(...chunks);
-        texts.set(piece.id, chunks);
+  function replace(blocks: Block[], url: string) {
+    const previousTexts = texts;
+    texts = new Map();
+    activeParts.clear();
+    work.clear();
+    pageUrl = url;
+
+    for (const block of blocks) {
+      const parts: Part[] = [];
+      if (session.source !== session.target) {
+        for (const piece of block.pieces) {
+          if (!piece.translate || !piece.text.trim()) continue;
+          const chunks = previousTexts.get(piece.id) ??
+            splitText(piece.text.trim()).map((text, index) => ({ id: piece.id + '-' + index, text }));
+          for (const part of chunks) {
+            parts.push(part);
+            activeParts.add(part);
+          }
+          texts.set(piece.id, chunks);
+        }
       }
+      work.set(block.id, { block, parts });
     }
-    work.set(block.id, { block, parts });
+
+    if (error && ![...activeParts].some((part) => part.error === error)) error = undefined;
+    if (inFlight && ![...inFlight.parts.values()].some((parts) => parts.some((part) => activeParts.has(part)))) {
+      cancelInFlight();
+    }
+    held = false;
   }
-  const total = [...work.values()].filter(({ parts }) => parts.length).length;
 
   function status(id: string): BlockStatus {
     const parts = work.get(id)?.parts ?? [];
@@ -42,15 +67,17 @@ export function createTranslation(blocks: Block[], session: Session, signal: Abo
   }
 
   function state(): ReaderState {
+    let total = 0;
     let done = 0;
     let failed = 0;
     for (const entry of work.values()) {
       if (!entry.parts.length) continue;
+      total++;
       const result = status(entry.block.id);
       if (result === 'done') done++;
       else if (result === 'failed') failed++;
     }
-    const phase = error ? 'error' : paused ? 'paused' : done + failed === total
+    const phase = error ? 'error' : paused ? 'paused' : held && !work.size ? 'preparing' : done + failed === total
       ? failed ? 'partial' : 'ready' : done || failed ? 'partial' : 'translating';
     return { status: phase, total, done, failed, error, cacheBytes };
   }
@@ -106,42 +133,102 @@ export function createTranslation(blocks: Block[], session: Session, signal: Abo
     cacheBytes += bytes;
   }
 
-  async function run() {
-    if (running || paused || signal.aborted) return;
-    running = true;
-    try {
-      while (!paused && !signal.aborted) {
-        const batch = next();
-        if (!batch.size) break;
-        const epoch = cacheEpoch;
-        const id = String(++batchNumber);
-        const items = [...batch].map(([text, [part]]) => ({ id: part!.id, text }));
-        const result: Result<BatchResult> = await browser.runtime.sendMessage({
-          type: 'batch', sessionId: session.id, batchId: id, items,
-        } satisfies ReaderRequest).catch(() => failure('unavailable'));
-        if (signal.aborted) return;
-        const translated = result?.ok && result.value.id === id
-          ? new Map(result.value.items.map((item) => [item.id, item.text])) : null;
-        const reason = result && !result.ok ? result.error : 'invalid-response';
-        for (const [text, parts] of batch) {
-          const value = translated?.get(parts[0]!.id);
-          for (const part of parts) {
-            if (value === undefined) part.error = reason;
-            else part.translated = value;
-          }
-          if (value !== undefined && cacheEnabled && epoch === cacheEpoch) remember(text, value);
-        }
-        if (!translated && pauseOn.has(reason)) {
-          paused = true;
-          error = reason;
-        }
-        update();
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      }
-    } finally {
-      running = false;
-      if (!signal.aborted) update();
+  function run() {
+    if (signal.aborted || held || canceling) return;
+    if (inFlight) {
+      if (inFlight.result !== undefined) settle(inFlight, inFlight.result);
+      return;
     }
+    if (paused || error) return;
+
+    const parts = next();
+    if (!parts.size) {
+      update();
+      return;
+    }
+    const id = String(++batchNumber);
+    const items = [...parts].map(([text, [part]]) => ({ id: part!.id, text }));
+    inFlight = { id, parts, cacheEpoch };
+    void sendBatch({ type: 'batch', sessionId: session.id, batchId: id, pageUrl, items });
+  }
+
+  async function sendBatch(message: Extract<ReaderRequest, { type: 'batch' }>) {
+    let result: Result<BatchResult> | null;
+    try {
+      result = await browser.runtime.sendMessage(message) ?? null;
+    } catch {
+      result = failure('unavailable');
+    }
+    if (signal.aborted || inFlight?.id !== message.batchId) return;
+    inFlight.result = result;
+    run();
+  }
+
+  function settle(batch: Batch, result: Result<BatchResult> | null) {
+    inFlight = undefined;
+    const translated = result?.ok && result.value.id === batch.id
+      ? new Map(result.value.items.map((item) => [item.id, item.text])) : null;
+    const reason = result && !result.ok ? result.error : 'invalid-response';
+    for (const [text, parts] of batch.parts) {
+      const current = parts.filter((part) => activeParts.has(part));
+      if (!current.length) continue;
+      const value = translated?.get(parts[0]!.id);
+      for (const part of current) {
+        if (value === undefined) part.error = reason;
+        else part.translated = value;
+      }
+      if (value !== undefined && cacheEnabled && batch.cacheEpoch === cacheEpoch) remember(text, value);
+    }
+    if (!translated && pauseOn.has(reason)) error = reason;
+    update();
+    if (!timer && !paused && !error && !signal.aborted) {
+      timer = window.setTimeout(() => {
+        timer = 0;
+        run();
+      }, 0);
+    }
+  }
+
+  function hold() {
+    held = true;
+    clearTimeout(timer);
+    timer = 0;
+  }
+
+  function cancelInFlight() {
+    const batch = inFlight;
+    inFlight = undefined;
+    if (!batch || batch.result !== undefined) return;
+    canceling = true;
+    void cancel(batch.id);
+  }
+
+  async function cancel(batchId: string) {
+    try {
+      await browser.runtime.sendMessage({ type: 'cancel', sessionId: session.id, batchId } satisfies ReaderRequest);
+    } catch {
+      // A torn-down Worker may no longer have the job.
+    } finally {
+      canceling = false;
+      run();
+    }
+  }
+
+  function clearCache(disable = false) {
+    cacheEpoch++;
+    cache.clear();
+    cacheBytes = 0;
+    if (disable) cacheEnabled = false;
+  }
+
+  function resetPage() {
+    hold();
+    cancelInFlight();
+    activeParts.clear();
+    work.clear();
+    texts.clear();
+    clearCache();
+    error = undefined;
   }
 
   function retry(blockId?: string) {
@@ -153,18 +240,24 @@ export function createTranslation(blocks: Block[], session: Session, signal: Abo
     error = undefined;
     paused = false;
     update();
-    void run();
+    run();
   }
 
+  signal.addEventListener('abort', () => {
+    hold();
+    inFlight = undefined;
+    activeParts.clear();
+    work.clear();
+    texts.clear();
+    clearCache();
+  }, { once: true });
+
   return {
-    state, status, show, run, retry,
+    state, status, show, run, retry, hold, replace, resetPage,
     pause() { paused = true; update(); },
-    resume() { if (error) retry(); else { paused = false; update(); void run(); } },
+    resume() { if (error) retry(); else { paused = false; update(); run(); } },
     clearCache(disable = false) {
-      cacheEpoch++;
-      cache.clear();
-      cacheBytes = 0;
-      if (disable) cacheEnabled = false;
+      clearCache(disable);
       update();
     },
   };
