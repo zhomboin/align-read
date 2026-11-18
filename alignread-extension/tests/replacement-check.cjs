@@ -9,8 +9,9 @@ const heldRoute = 'Pending route phrase';
 const heldStop = 'Pending stopped phrase';
 const reactiveOriginal = 'Reactive site phrase';
 const reactiveUpdate = 'Updated reactive site phrase';
+const arrowRight = {key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39};
 
-async function checkReplacementPopup({page, evaluate, until, request, saveYoudao, tabs, grants, session, youdaoOrigin, tabId}) {
+async function checkReplacementPopup({page, evaluate, until, request, dispatch, saveYoudao, tabs, grants, session, calls, youdaoOrigin, tabId}) {
   const tab = {url: 'https://example.test/guide', documentId: 'replacement-popup'};
   tabs.set(tabId, tab);
   assert((await saveYoudao({appKey: 'test-app', appSecret: 'test-secret'})).ok);
@@ -19,46 +20,107 @@ async function checkReplacementPopup({page, evaluate, until, request, saveYoudao
   await page('Emulation.setDeviceMetricsOverride', {width: 440, height: 800, deviceScaleFactor: 1, mobile: false});
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
 
-  const mode = 'document.querySelector(".mode-field select")';
-  const pick = (value) => evaluate(`fill(${mode}, ${JSON.stringify(value)}, 'change')`);
+  const mode = '.mode-field';
+  const range = '.translation-range-field';
+  const checked = (field) => `document.querySelector('${field} input[type="radio"]:checked')`;
+  const pick = (field, value) => evaluate(`document.querySelector('${field} input[value="${value}"]').labels[0].click()`);
   const button = (label) => `Array.from(document.querySelectorAll('button')).find(node => node.textContent === ${JSON.stringify(label)})`;
   const shown = (label) => until(() => evaluate(`!!${button(label)} && !${button(label)}.disabled`));
   const click = (label) => evaluate(`${button(label)}.click()`);
 
   await shown('开启双栏');
-  assert.equal(await evaluate(`${mode}.value`), 'dual');
+  assert.equal(await evaluate(`${checked(mode)}.value`), 'dual');
+  assert.equal(await evaluate(`${checked(range)}.value`), 'visible');
   await click('开启选词翻译');
   await shown('关闭选词翻译');
   const selectionId = tab.selectionId;
-  await pick('replace');
+  await pick(range, 'main');
+  await evaluate(`${checked(mode)}.focus()`);
+  await page('Input.dispatchKeyEvent', {type: 'keyDown', ...arrowRight});
+  await page('Input.dispatchKeyEvent', {type: 'keyUp', ...arrowRight});
+  assert(await evaluate(`${checked(mode)} === document.activeElement`));
+  assert.equal(await evaluate(`${checked(mode)}.value`), 'replace');
   await click('开启原位翻译');
   await shown('恢复原文');
   assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
+  assert.equal(session[`reader:${tabId}`].session.range, 'main');
   assert.deepEqual(await request({type: 'start', tabId, provider: 'youdao', mode: 'invalid',
     options: {source: 'en', target: 'zh-CN', range: 'main'}}, 'popup'), {ok: false, error: 'unavailable'});
   assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
   tab.readerState = {mode: 'replace', status: 'partial', total: 2, done: 1, failed: 1};
   await page('Page.reload');
   await shown('重试失败项');
-  assert.equal(await evaluate(`${mode}.value`), 'replace');
+  assert.equal(await evaluate(`${checked(mode)}.value`), 'replace');
   await click('重试失败项');
   await until(() => tab.readerRetryMode === 'replace');
+  await shown('重新翻译');
   assert.equal(tab.selectionId, selectionId);
-  await pick('dual');
+  await pick(mode, 'dual');
   await click('切换为双栏');
   await shown('关闭双栏');
   assert.equal(session[`reader:${tabId}`].session.mode, 'dual');
   assert.equal(tab.selectionId, selectionId);
-  await pick('replace');
+  await pick(mode, 'replace');
   await click('切换为原位翻译');
   await shown('恢复原文');
   await click('恢复原文');
   await shown('开启原位翻译');
   assert.equal(session[`reader:${tabId}`], undefined);
   assert.equal(tab.selectionId, selectionId);
+  await checkModeSwitchWorker({dispatch, request, session, tabId, tab, calls, until});
+  assert.equal(tab.selectionId, selectionId);
   await request({type: 'reset'});
   tabs.delete(tabId);
-  console.log('Built Popup retained the page mode, switched layouts, retried, and restored independently of selection.');
+  console.log('Built Popup switched range and mode with labels and the keyboard, retried, and restored independently of selection.');
+}
+
+async function checkModeSwitchWorker({dispatch, request, session, tabId, tab, calls, until}) {
+  const key = `reader:${tabId}`;
+  assert((await request({type: 'start', tabId, provider: 'youdao', mode: 'dual',
+    options: {source: 'en', target: 'zh-CN', range: 'main'}}, 'popup')).ok);
+  const previous = session[key];
+  const sender = {tab: {id: tabId}, frameId: 0, documentId: tab.documentId};
+  const changeMode = (overrides = {}, source = {}) => dispatch({
+    type: 'switch-mode', sessionId: previous.session.id, mode: 'replace', pageUrl: tab.url, ...overrides,
+  }, {...sender, url: tab.url, ...source});
+
+  assert.equal(await changeMode({}, {frameId: 1}), undefined);
+  assert.deepEqual(await changeMode({}, {documentId: 'other-document'}), {ok: false, error: 'stale'});
+  assert.deepEqual(await changeMode({sessionId: 'old-session'}), {ok: false, error: 'stale'});
+  tab.url = 'https://example.test/signin';
+  assert.deepEqual(await changeMode(), {ok: false, error: 'sensitive-site'});
+  assert.deepEqual(session[key], previous);
+
+  tab.url = 'https://example.test/guide/new';
+  assert.deepEqual(await changeMode({pageUrl: previous.pageUrl}), {ok: false, error: 'stale'});
+  const beforeBatch = calls.length;
+  const pendingBatch = dispatch({
+    type: 'batch', sessionId: previous.session.id,
+    pageUrl: tab.url, batchId: 'mode-pending', items: [{id: 'source', text: 'Pending before navigation'}],
+  }, {...sender, url: tab.url});
+  const pendingRequest = await until(() => calls[beforeBatch]);
+  tab.layoutFailure = true;
+  assert.deepEqual(await changeMode(), {ok: false, error: 'layout-start'});
+  tab.layoutFailure = false;
+  assert.deepEqual(session[key], previous);
+  assert.equal(tab.readerState.mode, 'dual');
+  assert.equal(pendingRequest.options.signal.aborted, false);
+
+  const switched = await changeMode();
+  assert(switched.ok && switched.value.mode === 'replace');
+  assert.equal(pendingRequest.options.signal.aborted, true);
+  assert.deepEqual(await pendingBatch, {ok: false, error: 'stale'});
+  const current = session[key];
+  assert.notEqual(current.session.id, previous.session.id);
+  assert.equal(tab.readerSessionId, current.session.id);
+  assert.deepEqual(current, {...previous, session: {
+    ...previous.session, id: current.session.id, mode: 'replace', pageUrl: tab.url,
+  }});
+  assert.deepEqual(await changeMode(), {ok: false, error: 'stale'});
+  assert.deepEqual(await dispatch({type: 'closed', sessionId: previous.session.id}, {...sender, url: tab.url}),
+    {ok: false, error: 'stale'});
+  assert.deepEqual(session[key], current);
+  console.log('Reader mode switch kept provider, choices and authorization, rejected stale routes, and retained the active grant on failure.');
 }
 
 async function checkReplacementBrowser({page, evaluate, until, build}) {
@@ -86,15 +148,31 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   const setParagraph = (id, value) => evaluate(`document.getElementById(${JSON.stringify(id)}).firstChild.data = ${JSON.stringify(value)}`);
   const appendParagraph = (id, value) => evaluate(`document.querySelector('main').insertAdjacentHTML('beforeend',
     ${JSON.stringify(`<p id="${id}">${value}</p>`)})`);
+  const picker = (mode) => `readerControl('.reader-mode-field input[value="${mode}"]')`;
+  const switchMode = (mode) => evaluate(`${picker(mode)}.labels[0].click()`);
+  const assertModeControls = async (mode) => {
+    const variant = mode === 'replace' ? '.replacement-controls' : '.toolbar';
+    assert(await evaluate(`readerShadows().length === 1 && !!readerControl('${variant} .reader-mode-field input:checked[value="${mode}"]')`));
+  };
   const assertOriginalLayout = async () => assert(await evaluate(`
     getComputedStyle(document.body).position === 'static' && document.body.getBoundingClientRect().width > innerWidth * .9 &&
-    document.adoptedStyleSheets.length === 0 && !document.querySelector('[data-alignread-host]')`));
+    document.adoptedStyleSheets.length === 0 && !readerControl('.toolbar')`));
 
   assert((await start('replace')).ok);
   const partial = await state('partial');
   assert.equal(partial.failed, 1);
   await assertOriginalLayout();
-  assert.equal(await content('#mixed'), '  译 Read 译 the guide 译 with 译 care 译 and loadItem().  ');
+  await assertModeControls('replace');
+  await switchMode('dual');
+  await until(() => evaluate(`readerControl('.mode-switch-error[role=status]')?.textContent.includes('960')`));
+  assert.equal((await command('state')).mode, 'replace');
+  assert.equal(await evaluate('replacementSwitches.length'), 0);
+  await assertModeControls('replace');
+  assert.equal(await content('#mixed'), '  译 Read 译 the guide 译 with 译 care 译 and loadItem("Inline code example").  ');
+  assert.equal(await content('#semantic-code'), 'const label = "Semantic code example";\n    report(label);');
+  assert.equal(await content('#rendered-code'), 'def print_sample():\n    return "Rendered code example"');
+  assert.deepEqual(await evaluate('[...document.querySelector("#role-code").children].map(line => line.textContent)'),
+    ['if ready:', '    log("Role code example")']);
   assert.equal(await content('#partial'), 'Partial heading Failed fragment');
   assert.equal(await content('#adjacent'), '译 First phrase 译 Second phrase');
   assert(await evaluate('checkOriginalNodes()'));
@@ -135,10 +213,12 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   const oldStop = await batchFor(heldStop);
   await evaluate(`{
     document.getElementById('site-owned').firstChild.data = 'Site latest value';
-    readerCommand({type:'reader:stop'});
+    [...readerControl('.replacement-controls').querySelectorAll('button')]
+      .find(button => button.textContent === '恢复原文').click();
   }`);
   await release(oldStop.batchId);
   assert.equal(await command('state'), null);
+  assert.equal(await evaluate('readerShadows().length'), 0);
   assert.equal(await content('#anchor'), 'Fresh site value');
   assert.equal(await content('#site-owned'), 'Site latest value');
   assert.equal(await content('#stop-pending'), heldStop);
@@ -151,12 +231,23 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await resize(1280);
   assert((await start('replace')).ok);
   await state('ready');
-  assert((await start('dual')).ok);
+  await assertModeControls('replace');
+  await switchMode('dual');
   await state('ready', 'dual');
-  assert(await evaluate(`checkOriginalText() && !!document.querySelector('[data-alignread-host]')`));
-  assert((await start('replace')).ok);
+  await assertModeControls('dual');
+  assert(await evaluate('checkOriginalNodes() && checkOriginalText()'));
+  assert(await evaluate(`readerShadows()[0].activeElement === ${picker('dual')}`));
+  await page('Input.dispatchKeyEvent', {type: 'keyDown', ...arrowRight});
+  await page('Input.dispatchKeyEvent', {type: 'keyUp', ...arrowRight});
   await state('ready');
+  await assertModeControls('replace');
+  assert(await evaluate(`readerShadows()[0].activeElement === ${picker('replace')}`));
   await assertOriginalLayout();
+  assert.equal(await content('#mixed'), '  译 Read 译 the guide 译 with 译 care 译 and loadItem("Inline code example").  ');
+  const switches = await evaluate('replacementSwitches');
+  assert.deepEqual(switches.map(({mode, pageUrl}) => ({mode, pageUrl})),
+    ['dual', 'replace'].map(mode => ({mode, pageUrl: fixtureUrl})));
+  assert.notEqual(switches[0].sessionId, switches[1].sessionId);
 
   await hold(heldRoute);
   await appendParagraph('route-pending', heldRoute);
@@ -174,7 +265,8 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await until(async () => (await command('state'))?.error === 'sensitive-site');
   assert.equal(await content('#next-page'), 'Next page phrase');
   await assertOriginalLayout();
-  console.log('Built in-place reader preserved nodes and layout, restored originals, retried, and isolated late responses.');
+  assert.equal(await evaluate('readerShadows().length'), 0);
+  console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
 
 function initReactiveSiteParagraph(original) {
@@ -196,10 +288,20 @@ function initReactiveSiteParagraph(original) {
 }
 
 function initReplacement(failedText) {
+  const shadows = new Set();
+  const attachShadow = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (options) {
+    const shadow = attachShadow.call(this, options);
+    shadows.add(shadow);
+    return shadow;
+  };
+  globalThis.readerShadows = () => [...shadows].filter(({host}) => host.isConnected && host.hasAttribute('data-alignread-host'));
+  globalThis.readerControl = (selector) => readerShadows().map(root => root.querySelector(selector)).find(Boolean);
   const adjacent = document.querySelector('#adjacent');
   adjacent.append(document.createTextNode('First phrase'), document.createTextNode(' Second phrase'));
   const mixed = document.querySelector('#mixed');
-  const tracked = [mixed, ...mixed.children, adjacent];
+  const tracked = [mixed, ...mixed.children, adjacent,
+    ...document.querySelectorAll('#semantic-code, #rendered-code, #role-code')];
   const children = tracked.map(element => [...element.childNodes]);
   const originals = tracked.map(element => element.textContent);
   globalThis.checkOriginalNodes = () => tracked.every((element, index) => children[index].length === element.childNodes.length &&
@@ -214,13 +316,26 @@ function initReplacement(failedText) {
   globalThis.replacementHeld = new Set();
   globalThis.replacementRelease = new Map();
   globalThis.replacementCancelled = [];
+  globalThis.replacementSwitches = [];
+  let session;
   let fail = true;
   chrome.runtime = {
     id: 'alignread-test',
     onMessage: {addListener(listener) {
-      globalThis.readerCommand = (message) => new Promise(resolve => listener(message, {id: 'alignread-test'}, resolve));
+      globalThis.readerCommand = (message) => {
+        if (message.type === 'reader:start') session = message.session;
+        return new Promise(resolve => listener(message, {id: 'alignread-test'}, resolve));
+      };
     }},
     async sendMessage(message) {
+      if (message.type === 'switch-mode') {
+        replacementSwitches.push(message);
+        if (message.sessionId !== session?.id || message.pageUrl !== location.href) return {ok: false, error: 'stale'};
+        const next = {...session, id: 'toolbar-' + replacementSwitches.length, mode: message.mode, pageUrl: message.pageUrl};
+        const result = await readerCommand({type: 'reader:switch-mode', previousSessionId: session.id, session: next});
+        if (result.ok) session = next;
+        return result;
+      }
       if (message.type === 'cancel') replacementCancelled.push(message.batchId);
       if (message.type !== 'batch') return {ok: true};
       replacementBatches.push(message);

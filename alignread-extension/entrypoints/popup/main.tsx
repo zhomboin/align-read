@@ -4,9 +4,11 @@ import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
-  TRANSLATION_PROVIDERS, defaults, errors, isProviderId, isReaderMode, selectedProviderAccess,
+  TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
   type ErrorCode, type PageState, type ProviderId, type ReaderControl, type ReaderMode, type ReadingOptions, type ReaderState,
 } from '../../src/shared/reader-messages';
+import { READER_MODE_OPTIONS } from '../../src/shared/reader-mode-options';
+import { SegmentedControl } from '../../src/shared/segmented-control';
 import '../../src/shared/settings-controls.css';
 import './popup.css';
 
@@ -15,8 +17,8 @@ const progressLabels = {
   partial: '已显示部分译文', ready: '翻译完成', error: '翻译遇到问题',
 };
 const modeLabels = {
-  dual: { name: '双栏对照', start: '开启双栏', switch: '切换为双栏', stop: '关闭双栏' },
-  replace: { name: '原位翻译', start: '开启原位翻译', switch: '切换为原位翻译', stop: '恢复原文' },
+  dual: { start: '开启双栏', switch: '切换为双栏', stop: '关闭双栏' },
+  replace: { start: '开启原位翻译', switch: '切换为原位翻译', stop: '恢复原文' },
 };
 const providers = Object.keys(TRANSLATION_PROVIDERS).filter(isProviderId);
 
@@ -134,22 +136,16 @@ function Popup() {
       </select>
     </label>}
     <LanguageFields value={choice} change={setChoice} locked={pending || Boolean(page?.error)} />
-    <label className="field mode-field">翻译模式
-      <select value={mode} disabled={pending || !page || Boolean(page.error)}
-        onChange={(event) => {
-          const next = event.currentTarget.value;
-          if (isReaderMode(next)) setModeChoice(next);
-        }}>
-        {Object.entries(modeLabels).map(([value, label]) => <option value={value} key={value}>{label.name}</option>)}
-      </select>
-    </label>
+    <SegmentedControl label="翻译模式" className="mode-field" options={READER_MODE_OPTIONS} value={mode}
+      change={setModeChoice} disabled={pending || !page || Boolean(page.error)} />
     {page?.sensitive && <label className="check sensitive">
       <input type="checkbox" checked={confirmSensitive} disabled={pending}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />
       <span>此页面可能包含敏感信息，我确认可以向当前服务发送待译文字。</span>
     </label>}
     {reader && !reader.error && <p className="notice" role="status">
-      {progressLabels[reader.status]}{reader.total > 0 && ' · ' + reader.done + '/' + reader.total}
+      {reader.status === 'ready' && reader.total === 0 ? '已显示原文' : progressLabels[reader.status]}
+      {reader.total > 0 && ' · ' + reader.done + '/' + reader.total}
     </p>}
     {info && <p className="notice" role="status">
       {info === 'unsupported-page' ? '当前页面无法使用翻译。' : errors[info]}

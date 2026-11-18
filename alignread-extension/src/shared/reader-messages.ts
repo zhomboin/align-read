@@ -127,11 +127,13 @@ export type OptionsMessage =
 export type ReaderRequest =
   | { type: 'batch'; sessionId: string; batchId: string; items: TranslationItem[]; pageUrl?: string }
   | { type: 'cancel'; sessionId: string; batchId: string }
+  | { type: 'switch-mode'; sessionId: string; mode: ReaderMode; pageUrl: string }
   | { type: 'closed'; sessionId: string }
   | { type: 'resize'; sessionId: string; ratio: number };
 export type ReaderCommand =
   | { type: 'reader:state' | `reader:${ReaderControl}` }
   | { type: 'reader:clear-cache'; disable?: boolean }
+  | { type: 'reader:switch-mode'; previousSessionId: string; session: Session }
   | { type: 'reader:start'; session: Session };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,6 +1,8 @@
 import { browser } from 'wxt/browser';
+import { MIN_WIDTH, viewportWidth } from '../src/reader/layout/split';
 import type { ActiveReader } from '../src/reader/session/reader';
-import { failure, isRecord, type ReaderCommand, type ReaderState, type Session } from '../src/shared/reader-messages';
+import { failure, isRecord, success, type ReaderCommand, type ReaderState, type Session } from '../src/shared/reader-messages';
+import { readReaderPage } from '../src/shared/reader-page';
 
 export default defineUnlistedScript(() => {
   const binding = window as Window & { __alignReadReader?: boolean };
@@ -17,14 +19,24 @@ export default defineUnlistedScript(() => {
     lastState = null;
   };
 
-  async function open(session: Session) {
-    stop();
+  async function open(session: Session, previousSessionId?: string) {
+    if (previousSessionId === undefined) stop();
+    else if (active?.id !== previousSessionId) return failure('stale');
     const command = generation;
     const mode = session.mode ?? 'dual';
     const start = mode === 'replace'
       ? (await import('../src/reader/session/replacement-reader')).startReplacementReader
       : (await import('../src/reader/session/reader')).startReader;
     if (command !== generation) return failure('stale');
+    if (previousSessionId !== undefined) {
+      const page = readReaderPage(location.href);
+      if (active?.id !== previousSessionId || !page || page.key !== readReaderPage(session.pageUrl)?.key) {
+        return failure('stale');
+      }
+      if (!document.body) return failure('unsupported-page');
+      if (mode === 'dual' && viewportWidth() < MIN_WIDTH) return failure('narrow');
+      stop();
+    }
     const started = start(session, (reason) => {
       if (active?.id !== session.id) return;
       active = undefined;
@@ -33,7 +45,8 @@ export default defineUnlistedScript(() => {
     if (!started.ok) return failure(started.error);
     const reader = started.value;
     active = { ...reader, state: () => ({ ...reader.state(), mode }) };
-    return { ok: true, value: active.state() };
+    if (previousSessionId !== undefined) reader.focusMode();
+    return success(active.state());
   }
 
   browser.runtime.onMessage.addListener((message: unknown, sender, reply) => {
@@ -65,6 +78,9 @@ export default defineUnlistedScript(() => {
         break;
       case 'reader:start':
         void open(command.session).then(reply, () => reply(failure('unavailable')));
+        return true;
+      case 'reader:switch-mode':
+        void open(command.session, command.previousSessionId).then(reply, () => reply(failure('unavailable')));
         return true;
     }
   });

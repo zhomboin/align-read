@@ -2,6 +2,7 @@ import { createElement, type CSSProperties, type PointerEvent as ReactPointerEve
 import { errors, LANGUAGES, LIMITS, type ReaderState, type Session } from '../../shared/reader-messages';
 import type { Piece, ReadingNode } from '../extraction/document';
 import type { BlockStatus } from '../session/translation';
+import { ReaderModeControl, type ReaderModeSwitch } from './reader-mode-controls';
 
 type Props = {
   session: Session; state: ReaderState; nodes: ReadingNode[];
@@ -13,6 +14,7 @@ type Props = {
   retry: (id?: string) => void; close: () => void;
   setRatio: (ratio: number, final: boolean) => void;
   toggleSync: () => void; toggleHover: () => void; togglePause: () => void;
+  modeSwitch: ReaderModeSwitch;
 };
 
 const summaries = {
@@ -21,7 +23,7 @@ const summaries = {
 };
 
 export function ReaderPanel(props: Props) {
-  const { session, state, sync, hover, ratio } = props;
+  const { session, state, sync, hover, ratio, modeSwitch } = props;
 
   function beginDrag(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
@@ -51,18 +53,25 @@ export function ReaderPanel(props: Props) {
             <h1>译文</h1>
             <p>{session.source === 'auto' ? '自动检测' : LANGUAGES[session.source]} → {LANGUAGES[session.target]}</p>
           </div>
-          <button type="button" onClick={props.close}>关闭</button>
+          <button type="button" disabled={modeSwitch.pending} onClick={props.close}>关闭</button>
         </div>
-        {props.nodes.length > 0 && <div className="controls">
-          <button type="button" aria-pressed={sync} onClick={props.toggleSync}>同步滚动</button>
-          <button type="button" aria-pressed={hover} onClick={props.toggleHover}>悬停高亮</button>
-          {!state.error && state.done + state.failed < state.total && <button type="button" onClick={props.togglePause}>
-            {state.status === 'paused' ? '继续' : '暂停'}
-          </button>}
-          {state.failed > 0 && <button type="button" onClick={() => props.retry()}>重试失败项</button>}
-        </div>}
+        <div className="controls" aria-busy={modeSwitch.pending}>
+          <ReaderModeControl mode="dual" modeSwitch={modeSwitch} />
+          {props.nodes.length > 0 && <>
+            <button type="button" disabled={modeSwitch.pending} aria-pressed={sync} onClick={props.toggleSync}>同步滚动</button>
+            <button type="button" disabled={modeSwitch.pending} aria-pressed={hover} onClick={props.toggleHover}>悬停高亮</button>
+            {!state.error && state.done + state.failed < state.total && <button type="button"
+              disabled={modeSwitch.pending} onClick={props.togglePause}>
+              {state.status === 'paused' ? '继续' : '暂停'}
+            </button>}
+            {state.failed > 0 && <button type="button" disabled={modeSwitch.pending} onClick={() => props.retry()}>
+              重试失败项
+            </button>}
+          </>}
+        </div>
+        {modeSwitch.error && <p className="mode-switch-error" role="status">{errors[modeSwitch.error]}</p>}
         <div className="status" role="status">
-          {state.error ? errors[state.error] : summaries[state.status]}
+          {state.error ? errors[state.error] : state.status === 'ready' && state.total === 0 ? '已显示原文' : summaries[state.status]}
           {state.total > 0 && <span>{state.done}/{state.total}{state.failed ? ' · 失败 ' + state.failed : ''}</span>}
         </div>
         {state.total > 0 && <progress aria-label="翻译进度" max={state.total} value={state.done + state.failed} />}
@@ -107,10 +116,12 @@ function hasColumns(nodes: ReadingNode[]): boolean {
 
 function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
   if ('children' in node) {
+    const compactRow = node.compactRow;
     const style: CSSProperties & { '--reading-list-width'?: string } = {
       ...node.surface, flexGrow: node.columnWeight, textAlign: node.align,
       captionSide: node.captionSide, listStyleType: node.marker,
       justifyContent: node.inlineRow?.align,
+      rowGap: compactRow?.rowGap, columnGap: compactRow?.columnGap,
     };
     if (node.listColumns) {
       style['--reading-list-width'] = `calc((100% - ${node.listColumns - 1} * .75em) / ${node.listColumns})`;
@@ -120,14 +131,20 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
       scope: node.scope, reversed: node.reversed, value: node.listValue,
       'data-sidebar-side': node.side, 'data-reading-area': node.area,
       'data-reading-columns': node.columns,
+      'data-reading-list-row': node.listRow,
       'data-reading-inline-row': Boolean(node.inlineRow) || undefined,
-      dir: node.columns ?? node.inlineRow?.direction ?? node.navigation?.direction,
+      'data-reading-compact-row': Boolean(compactRow) || undefined,
+      'data-reading-compact-reverse': compactRow?.reverse,
+      'data-reading-compact-scroll': compactRow?.scroll,
+      dir: node.columns ?? node.inlineRow?.direction ?? compactRow?.direction ?? node.navigation?.direction,
+      tabIndex: compactRow?.scroll ? 0 : undefined,
       'data-reading-navigation': node.navigation?.style,
       'data-vertical': node.navigation?.vertical || undefined,
       'aria-current': node.current || undefined,
       'data-reading-disclosure': node.disclosure,
       'data-reading-list-columns': node.listColumns,
       'data-reading-surface': Boolean(node.surface) || undefined,
+      'data-reading-code-cell': node.codeCell,
       style,
     }, node.children.map((child, index) => nodeView(child, props, index)));
     return node.tag === 'table'

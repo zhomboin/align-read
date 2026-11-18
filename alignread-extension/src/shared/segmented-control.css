@@ -1,0 +1,70 @@
+.segmented-field { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+
+.segmented-field legend {
+  padding: 0;
+  margin-block-end: 6px;
+  font-weight: 600;
+}
+
+.segmented-choices {
+  --track-padding: 3px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: var(--track-padding);
+  border: 1px solid var(--field-line);
+  border-radius: 10px;
+  background: var(--surface-hover);
+  box-shadow: var(--inset);
+}
+
+.segmented-choices::before {
+  content: '';
+  position: absolute;
+  inset-block: var(--track-padding);
+  inset-inline-start: var(--track-padding);
+  inline-size: calc(50% - var(--track-padding));
+  border-radius: 6px;
+  background: var(--accent);
+  pointer-events: none;
+  transition: transform 160ms cubic-bezier(.2, .75, .25, 1);
+}
+
+.segmented-choices[data-second="true"]::before { transform: translateX(100%); }
+.segmented-choices:dir(rtl)[data-second="true"]::before { transform: translateX(-100%); }
+.segmented-field:disabled .segmented-choices { opacity: .57; }
+
+.segmented-choices label { position: relative; display: grid; cursor: pointer; }
+.segmented-field:disabled label { cursor: default; }
+.segmented-choices input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: 0;
+  clip-path: inset(50%);
+}
+
+.segmented-choices label > span {
+  display: grid;
+  place-items: center;
+  min-block-size: 34px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+}
+
+.segmented-choices input:checked + span { color: var(--light); }
+.segmented-choices label:hover input:not(:checked, :disabled) + span { color: var(--ink); }
+.segmented-choices input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-choices::before { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .segmented-choices::before { forced-color-adjust: none; background: Highlight; }
+  .segmented-choices input:checked + span { forced-color-adjust: none; color: HighlightText; }
+  .segmented-choices input:focus-visible + span { outline-color: Highlight; }
+}

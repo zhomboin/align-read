@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Repository file browser</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 sans-serif; }
+    header, main { padding: 16px 24px; }
+    .hydrate { display: contents; }
+    .repository { list-style: none; padding: 0; }
+    .repository li {
+      display: grid; grid-template-columns: repeat(24, minmax(0, 1fr));
+      align-items: center; padding: 8px; border-bottom: 1px solid #dde2e8;
+    }
+    .repository :is(a, span, time) { min-width: 0; overflow-wrap: anywhere; }
+    .name { grid-column: 1 / span 11; }
+    .size { grid-column: 12 / span 3; }
+    .commit { grid-column: 15 / span 7; }
+    .commit, .rendered-code, .code-line { font-family: ui-monospace, monospace; }
+    .updated { grid-column: 22 / span 3; }
+    .tools-panel[data-state="closed"] { max-block-size: 0; overflow: hidden; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+      overflow: hidden; white-space: nowrap; clip-path: inset(50%); border: 0;
+    }
+    .code-line { white-space: pre; }
+    .rendered-code { white-space: pre-wrap; }
+    .hljs-keyword { color: #922c83; }
+    pre { overflow: auto; }
+  </style>
+</head>
+<body>
+  <header><a href="https://example.com/repository">Repository home</a></header>
+  <main>
+    <h1>Files and versions</h1>
+    <div class="hydrate">
+      <div class="hydrate">
+        <ul class="repository">
+          <li id="directory-row">
+            <a class="name" href="https://example.com/repository/files/directory">scheduler_v2</a>
+            <span class="size"></span>
+            <a class="commit" href="https://example.com/repository/commit/directory">Update scheduler directory</a>
+            <time class="updated" datetime="2026-02-06">Seven days ago</time>
+          </li>
+          <li id="readme-row">
+            <a class="name" href="https://example.com/repository/files/readme">README.md</a>
+            <span class="size">12.5 kB</span>
+            <a class="commit" href="https://example.com/repository/commit/docs">Refresh repository guidance</a>
+            <time class="updated" datetime="2026-02-12">One day ago</time>
+          </li>
+          <li id="model-row">
+            <a class="name" href="https://example.com/repository/files/model">large_repository_snapshot_weights_for_the_code_browser.safetensors</a>
+            <span class="size">40.6 MB</span>
+            <a class="commit" href="https://example.com/repository/commit/model">Add model weights</a>
+            <time class="updated" datetime="2026-02-06">Seven days ago</time>
+          </li>
+        </ul>
+      </div>
+      <h2>Usage example</h2>
+      <pre><code>function visible_example() {<br>    return "Semantic code example";
+}</code></pre>
+      <div class="rendered-code"><span>def</span> build_sample():
+    return "Rendered code example"</div>
+      <div role="code"><div><span>if</span> ready:</div><div>    log("Role code example")</div></div>
+      <p>Pass <code>Inline code example</code> as the first argument.</p>
+      <table>
+        <tbody>
+          <tr><td>1</td><td class="code-line"><span class="hljs-keyword">if</span> value:</td></tr>
+          <tr><td>2</td><td class="code-line">    <span class="hljs-keyword">return</span> "Code cell should stay unchanged"</td></tr>
+          <tr><td>3</td><td class="code-line"></td></tr>
+          <tr><td>4</td><td class="code-line"># Code cell closing comment</td></tr>
+        </tbody>
+      </table>
+      <div class="tools-panel" data-state="closed">
+        <p>Hidden menu instructions</p>
+        <pre><code>function hidden_example() {
+    return "hidden";
+}</code></pre>
+      </div>
+      <nav class="sr-only" aria-label="Repository shortcuts">
+        <p>Clipped drawer instructions</p>
+      </nav>
+      <div class="inert-tools" inert><p>Inactive tool instructions</p></div>
+    </div>
+    <p>Repository usage notes</p>
+  </main>
+</body>
+</html>

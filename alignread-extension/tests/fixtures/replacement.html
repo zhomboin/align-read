@@ -3,11 +3,14 @@
 <head>
   <meta charset="utf-8">
   <title>In-place reader fixture</title>
+  <style>
+    .rendered-code { white-space: pre-wrap; font-family: ui-monospace, monospace; }
+  </style>
 </head>
 <body>
   <nav>Outside the reading scope</nav>
   <main>
-    <p id="mixed">  Read <a href="#anchor" title="Guide">the guide</a> with <strong>care</strong> and <code>loadItem()</code>.  </p>
+    <p id="mixed">  Read <a href="#anchor" title="Guide">the guide</a> with <strong>care</strong> and <code>loadItem("Inline code example")</code>.  </p>
     <p id="adjacent"></p>
     <p id="anchor">Original site paragraph</p>
     <p id="site-owned">Site controlled phrase</p>
@@ -15,7 +18,11 @@
     <p hidden>Hidden phrase</p>
     <p contenteditable>Editable value</p>
     <form><label>Form label <input value="Input value"></label></form>
-    <pre>const untouched = true;</pre>
+    <pre id="semantic-code">const label = "Semantic code example";
+    report(label);</pre>
+    <div id="rendered-code" class="rendered-code"><span>def</span> print_sample():
+    return "Rendered code example"</div>
+    <div id="role-code" role="code"><div><span>if</span> ready:</div><div>    log("Role code example")</div></div>
   </main>
 </body>
 </html>
