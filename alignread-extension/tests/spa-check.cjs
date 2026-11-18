@@ -1,16 +1,18 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const {setTimeout: wait} = require('node:timers/promises');
 
 const spaFixturePath = '/spa-fixture.html';
 const heldText = 'In-flight text from previous route';
+const queryHeldText = 'In-flight text before query change';
 
 async function checkSpaBrowser({page, evaluate, until, build}) {
   const fixtureUrl = 'http://alignread.test' + spaFixturePath;
   await page('Page.navigate', {url: fixtureUrl});
   await until(() => evaluate(`location.href === ${JSON.stringify(fixtureUrl)} && !!document.querySelector('#anchor')`));
   await page('Emulation.setDeviceMetricsOverride', {width: 1440, height: 900, deviceScaleFactor: 1, mobile: false});
-  await evaluate(`(${initSpaReader})(${JSON.stringify(heldText)})`);
+  await evaluate(`(${initSpaReader})(${JSON.stringify([heldText, queryHeldText])})`);
   await evaluate(fs.readFileSync(path.join(build, 'reader.js'), 'utf8'));
 
   const command = (type) => evaluate(`readerCommand({type:'reader:${type}'})`);
@@ -22,12 +24,35 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   });
   const messages = () => evaluate('spaBatches.flatMap(({items}) => items.map(({text}) => text))');
   const clearMessages = () => evaluate('spaBatches.length = 0');
+  const findBatch = (text) => until(() => evaluate(`spaBatches.find(({items}) => items.some(({text}) => text === ${JSON.stringify(text)}))`));
+  const cancelled = (batchId) => until(() => evaluate(`spaCancelled.includes(${JSON.stringify(batchId)})`));
+  const release = (batchId) => evaluate(`spaReleaseBatches.get(${JSON.stringify(batchId)})()`);
+  const assertSameSplit = async () => assert(await evaluate(`spaPane.host === originalSpaHost && originalSpaHost.isConnected &&
+    document.body.getBoundingClientRect().width < innerWidth - 1`));
   const start = (range, pageUrl) => evaluate(`readerCommand({type:'reader:start',session:{id:'spa',source:'en',target:'zh-CN',
     range:${JSON.stringify(range)},pageUrl:${JSON.stringify(pageUrl)},ratio:.5,highlight:true,syncScroll:true,cache:false}})`);
   assert.deepEqual(await start('main', fixtureUrl + '?previous'), {ok: false, error: 'stale'});
   assert((await start('main', fixtureUrl)).ok);
   await ready();
   assert(await translated('Unchanged introduction'));
+  assert(await translated('Overview tab content'));
+  await evaluate('globalThis.originalSpaHost = spaPane.host');
+  await clearMessages();
+  await evaluate(`document.querySelector('a[href="#overview"]').click()`);
+  await until(() => evaluate(`location.hash === '#overview'`));
+  await evaluate(`document.querySelector('a[href="#learn"]').click()`);
+  await until(() => evaluate(`location.hash === '#learn'`));
+  await until(() => translated('Learn tab guide'));
+  await ready();
+  await assertSameSplit();
+  assert(await translated('Unchanged introduction'));
+  assert.equal(await translated('Overview tab content'), false);
+  assert.deepEqual((await messages()).sort(), ['Learn tab guide', 'Learning resources']);
+  const learnSource = await evaluate(`{
+    spaPane.querySelector('article li [data-reader-block], article li[data-reader-block]').click();
+    CSS.highlights.get('alignread-paragraph')?.values().next().value?.startContainer.parentElement.id;
+  }`);
+  assert.equal(learnSource, 'learn-guide');
   await clearMessages();
   await evaluate(`{
     document.querySelector('#editable-text').firstChild.data = 'Updated paragraph';
@@ -68,16 +93,23 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   assert.deepEqual(await messages(), ['Added while paused']);
 
   await clearMessages();
-  await evaluate(`location.hash = '#anchor'`);
+  await evaluate(`document.querySelector('a[href="#css-target"]').click()`);
+  await until(() => translated('Content revealed by the hash target'));
+  await ready();
+  await assertSameSplit();
+  assert.deepEqual(await messages(), ['Content revealed by the hash target']);
+  await clearMessages();
+  await evaluate(`document.querySelector('a[href="#anchor"]').click()`);
   await until(() => evaluate(`location.hash === '#anchor'`));
+  await until(async () => !(await translated('Content revealed by the hash target')));
   assert(await translated('Unchanged introduction'));
   assert.deepEqual(await messages(), []);
   await evaluate(`document.querySelector('main').insertAdjacentHTML('beforeend', '<p>${heldText}</p>')`);
-  const oldBatch = await until(() => evaluate(`spaBatches.find(({items}) => items.some(({text}) => text === ${JSON.stringify(heldText)}))`));
+  const oldBatch = await findBatch(heldText);
   assert.equal(new URL(oldBatch.pageUrl).pathname, spaFixturePath);
   await evaluate(`history.pushState(null, '', '/spa-next')`);
   await until(async () => !(await translated('Unchanged introduction')));
-  await until(() => evaluate(`spaCancelled.includes(${JSON.stringify(oldBatch.batchId)})`));
+  await cancelled(oldBatch.batchId);
   await evaluate(`document.querySelector('main').insertAdjacentHTML('beforeend', '<p>Loading next chapter</p>')`);
   await until(() => translated('Loading next chapter'));
   assert.deepEqual((await messages()).sort(), [heldText, 'Loading next chapter'].sort());
@@ -85,7 +117,7 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   await until(() => translated('New route paragraph'));
   await ready();
   assert.equal(await evaluate(`new URL(spaBatches.at(-1).pageUrl).pathname`), '/spa-next');
-  await evaluate('spaReleaseOldBatch()');
+  await release(oldBatch.batchId);
   assert.equal(await translated(heldText), false);
   assert(await translated('New route paragraph'));
   assert.deepEqual((await messages()).sort(), [heldText, 'Loading next chapter', 'New route article', 'New route paragraph'].sort());
@@ -94,7 +126,9 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   await command('pause');
   await evaluate(`{
     history.replaceState(null, '', '#/chapter');
-    document.querySelector('#view').innerHTML = '<p>Hash route article</p>';
+    document.querySelector('#view').innerHTML = '<p>Hash route article</p>' +
+      '<p id="query-extra">Paragraph filtered by query</p><p id="query-retained">Retained query item</p>' +
+      '<p><a href="#anchor">Inline navigation link</a></p>';
   }`);
   await until(() => evaluate(`spaPane.querySelector('article')?.textContent.includes('Hash route article')`));
   assert.equal((await command('state')).status, 'paused');
@@ -104,6 +138,46 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   await ready();
   assert.equal(await translated('New route paragraph'), false);
   assert.equal(await evaluate(`new URL(spaBatches.at(-1).pageUrl).hash`), '#/chapter');
+
+  await clearMessages();
+  await evaluate(`history.replaceState(null, '', '?sort=recent#/chapter')`);
+  await wait(250);
+  await assertSameSplit();
+  assert(await translated('Hash route article'));
+  assert.equal((await command('state')).status, 'ready');
+  assert.deepEqual(await messages(), []);
+
+  await evaluate(`{
+    history.replaceState(null, '', '?filter=guide#/chapter');
+    document.querySelector('#view').prepend(document.querySelector('#query-retained'));
+    document.querySelector('#query-extra').remove();
+  }`);
+  await until(() => evaluate(`spaPane.querySelector('article [data-reader-block]')?.textContent === '译 Retained query item'`));
+  await ready();
+  await assertSameSplit();
+  assert.equal(await translated('Paragraph filtered by query'), false);
+  assert(await translated('Hash route article'));
+  assert(await translated('Inline navigation link'));
+  assert.equal(await evaluate(`new URL(spaPane.querySelector('article a[href$="#anchor"]').href).search`), '?filter=guide');
+  assert.deepEqual(await messages(), []);
+
+  await evaluate(`document.querySelector('#view').insertAdjacentHTML('beforeend', '<p>${queryHeldText}</p>')`);
+  const oldQueryBatch = await findBatch(queryHeldText);
+  assert.equal(new URL(oldQueryBatch.pageUrl).search, '?filter=guide');
+  await clearMessages();
+  await evaluate(`{
+    history.replaceState(null, '', '?filter=reference#/chapter');
+    document.querySelector('#view').insertAdjacentHTML('beforeend', '<p>New paragraph after query change</p>');
+  }`);
+  await cancelled(oldQueryBatch.batchId);
+  await until(() => translated('New paragraph after query change'));
+  await ready();
+  await release(oldQueryBatch.batchId);
+  await assertSameSplit();
+  assert(await translated('Retained query item'));
+  assert(await translated(queryHeldText));
+  assert.deepEqual((await messages()).sort(), [queryHeldText, 'New paragraph after query change'].sort());
+  assert(await evaluate(`spaBatches.every(({pageUrl}) => new URL(pageUrl).search === '?filter=reference')`));
 
   await evaluate('history.back()');
   await until(() => evaluate(`location.pathname === ${JSON.stringify(spaFixturePath)}`));
@@ -117,7 +191,7 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   assert.equal(await evaluate(`CSS.highlights.has('alignread-paragraph')`), false);
   await clearMessages();
   await evaluate(`document.querySelector('#view').append('Edited after the reader stopped');`);
-  await new Promise(resolve => setTimeout(resolve, 300));
+  await wait(300);
   assert.deepEqual(await messages(), []);
 
   assert((await start('visible', fixtureUrl)).ok);
@@ -143,7 +217,8 @@ async function checkSpaBrowser({page, evaluate, until, build}) {
   console.log('SPA reader retained unchanged translations, updated live content and alignment, rejected late batches, and cleaned up.');
 }
 
-function initSpaReader(heldText) {
+function initSpaReader(heldTexts) {
+  const held = new Set(heldTexts);
   const nativeAttachShadow = Element.prototype.attachShadow;
   Element.prototype.attachShadow = function(options) {
     const shadow = nativeAttachShadow.call(this, options);
@@ -152,6 +227,7 @@ function initSpaReader(heldText) {
   };
   globalThis.spaBatches = [];
   globalThis.spaCancelled = [];
+  globalThis.spaReleaseBatches = new Map();
   globalThis.chrome ??= {};
   chrome.runtime = {
     id: 'alignread-test',
@@ -162,10 +238,10 @@ function initSpaReader(heldText) {
       if (message.type === 'cancel') spaCancelled.push(message.batchId);
       if (message.type !== 'batch') return {ok: true};
       spaBatches.push(message);
-      if (message.items.some(({text}) => text === heldText)) {
-        await new Promise(resolve => { globalThis.spaReleaseOldBatch = resolve; });
-      }
-      return {ok: true, value: {id: message.batchId, items: message.items.map(({id, text}) => ({id, text: '译 ' + text}))}};
+      const delayed = message.items.some(({text}) => held.delete(text));
+      if (delayed) await new Promise(resolve => spaReleaseBatches.set(message.batchId, resolve));
+      const prefix = delayed ? '过期 ' : '译 ';
+      return {ok: true, value: {id: message.batchId, items: message.items.map(({id, text}) => ({id, text: prefix + text}))}};
     },
   };
 }

@@ -3,9 +3,20 @@
 <head>
   <meta charset="utf-8">
   <title>SPA reader fixture</title>
-  <style>#css-revealed { display: var(--paragraph-display, none); }</style>
+  <style>
+    #css-revealed { display: var(--paragraph-display, none); }
+    .project-panel:not(.active), #css-target:not(:target) { display: none; }
+  </style>
 </head>
 <body>
+  <nav aria-label="Project navigation">
+    <div role="tablist" aria-label="Project information">
+      <a href="#overview" role="tab" aria-controls="overview" aria-selected="true">Overview</a>
+      <a href="#learn" role="tab" aria-controls="learn" aria-selected="false">Learn</a>
+    </div>
+    <a href="#css-target">A CSS tab</a>
+    <a href="#anchor">An ordinary anchor</a>
+  </nav>
   <main>
     <h1>Reading guide</h1>
     <p id="anchor">Unchanged introduction</p>
@@ -13,6 +24,30 @@
     <p id="removed">Paragraph to remove</p>
     <p id="hidden" hidden>Revealed paragraph</p>
     <p id="css-revealed">Revealed by style</p>
+    <section id="overview" class="project-panel active" role="tabpanel" aria-hidden="false">
+      <h2>Project overview</h2>
+      <p>Overview tab content</p>
+    </section>
+    <section id="learn" class="project-panel" role="tabpanel" aria-hidden="true" hidden>
+      <h2>Learning resources</h2>
+      <ul><li id="learn-guide">Learn tab guide</li></ul>
+    </section>
+    <section id="css-target"><p>Content revealed by the hash target</p></section>
   </main>
+  <script>
+    const tabs = document.querySelectorAll('[role="tab"]');
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => {
+        for (const item of tabs) {
+          const selected = item === tab;
+          const panel = document.getElementById(item.getAttribute('aria-controls'));
+          item.setAttribute('aria-selected', String(selected));
+          panel.classList.toggle('active', selected);
+          panel.setAttribute('aria-hidden', String(!selected));
+          panel.hidden = !selected;
+        }
+      });
+    }
+  </script>
 </body>
 </html>

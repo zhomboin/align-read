@@ -221,9 +221,13 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
     if (disable) cacheEnabled = false;
   }
 
-  function resetPage() {
+  function refreshAddress() {
     hold();
     cancelInFlight();
+  }
+
+  function resetPage() {
+    refreshAddress();
     activeParts.clear();
     work.clear();
     texts.clear();
@@ -253,7 +257,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   }, { once: true });
 
   return {
-    state, status, show, run, retry, hold, replace, resetPage,
+    state, status, show, run, retry, hold, replace, refreshAddress, resetPage,
     pause() { paused = true; update(); },
     resume() { if (error) retry(); else { paused = false; update(); run(); } },
     clearCache(disable = false) {

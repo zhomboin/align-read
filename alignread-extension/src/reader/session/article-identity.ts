@@ -39,7 +39,6 @@ function sameBlock(block: Block, previous: Block) {
   return block.pieces.every((piece, index) => {
     const oldPiece = previous.pieces[index]!;
     return piece.text === oldPiece.text && piece.translate === oldPiece.translate &&
-      piece.href === oldPiece.href && piece.lineBreak === oldPiece.lineBreak &&
-      piece.marks.length === oldPiece.marks.length && piece.marks.every((mark, markIndex) => mark === oldPiece.marks[markIndex]);
+      piece.lineBreak === oldPiece.lineBreak;
   });
 }

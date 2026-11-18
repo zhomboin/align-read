@@ -41,6 +41,8 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let alignmentLife: AbortController | undefined;
   let initialLayout = true;
   let pageKey = initialPage?.key ?? location.href.split('#', 1)[0]!;
+  let viewKey = initialPage?.viewKey ?? pageKey;
+  let pageHash = location.hash;
   const outgoing = new WeakMap<Text, { key: string; text: string }>();
   let pageText = new Map<Text, string>();
   let waitingForRoute = false;
@@ -146,7 +148,12 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
     }
     const page = readReaderPage(location.href);
     const nextKey = page?.key ?? location.href.split('#', 1)[0]!;
-    if (nextKey === pageKey) return true;
+    const fragmentChanged = pageHash !== location.hash;
+    pageHash = location.hash;
+    if (nextKey === pageKey) {
+      if (fragmentChanged) sourceChanged();
+      return true;
+    }
     if (!page || page.origin !== initialPage?.origin) {
       close('unsupported-page');
       return false;
@@ -155,13 +162,21 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       close('sensitive-site');
       return false;
     }
-    for (const [node, text] of pageText) outgoing.set(node, { key: pageKey, text });
+    revision++;
+    extraction?.abort();
+    if (page.viewKey === viewKey) {
+      pageKey = page.key;
+      translation.refreshAddress();
+      disconnectAlignment();
+      scheduleRefresh();
+      return true;
+    }
+    for (const [node, text] of pageText) outgoing.set(node, { key: viewKey, text });
     pageText.clear();
     waitForMutation = initialLayout;
     waitingForRoute = true;
     pageKey = page.key;
-    revision++;
-    extraction?.abort();
+    viewKey = page.viewKey;
     translation.resetPage();
     disconnectAlignment();
     article = undefined;
@@ -190,7 +205,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   async function refresh() {
     const current = revision;
     const href = location.href;
-    const key = pageKey;
+    const key = viewKey;
     const controller = new AbortController();
     extraction = controller;
     try {
