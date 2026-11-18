@@ -9,9 +9,10 @@ import { google } from '../src/background/translation/google';
 import type { TranslationBatch } from '../src/background/translation/provider';
 import { youdao } from '../src/background/translation/youdao';
 import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
+import { readReaderPage } from '../src/shared/reader-page';
 import {
   LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
-  isSensitive, isTabId, selectedProviderAccess, success,
+  isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
 } from '../src/shared/reader-messages';
@@ -41,7 +42,7 @@ export default defineBackground(() => {
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
       response = typeof message.type === 'string' && message.type.startsWith('selection:')
         ? selection(sender.tab.id, sender.documentId, sender.url, message as unknown as SelectionRequest)
-        : reader(sender.tab.id, sender.documentId, message as unknown as ReaderRequest);
+        : reader(sender.tab.id, sender.documentId, sender.url, message as unknown as ReaderRequest);
     }
     if (!response) return;
     void response.then(reply, () => reply(failure('unavailable')));
@@ -279,7 +280,7 @@ async function popup(message: PopupMessage) {
   const url = tab.url ? new URL(tab.url) : undefined;
   const available = url && /^https?:$/.test(url.protocol) && !/\.pdf$/i.test(url.pathname);
   const disabled = available && isDisabled(url.hostname, settings);
-  const sensitive = Boolean(available && isSensitive(url.hostname, url.pathname));
+  const sensitive = readReaderPage(tab.url)?.sensitive ?? false;
 
   if (message.type === 'page') {
     const grant = available && !disabled ? await getGrant(tabId, 'selection') : undefined;
@@ -351,11 +352,12 @@ async function popup(message: PopupMessage) {
     source: message.options.source, target: message.options.target, range: message.options.range,
     id: crypto.randomUUID(), ratio: view.ratio,
     highlight: view.highlight, syncScroll: view.syncScroll, cache: view.cache && !sensitive,
+    ...(kind === 'reader' && { pageUrl: tab.url }),
   };
   await clearGrant(tabId, kind);
   await browser.storage.session.set({
     [grantKey(tabId, kind)]: { session, documentId, hostname: url.hostname, revision: settings.revision,
-      provider: settings.provider, ...(kind === 'selection' && { pageUrl: tab.url }) } satisfies Grant,
+      provider: settings.provider, pageUrl: tab.url } satisfies Grant,
   });
   try {
     const result = await send(tabId, documentId, { type: `${kind}:start`, session });
@@ -371,21 +373,41 @@ function send(tabId: number, documentId: string, message: ReaderCommand | Select
   return browser.tabs.sendMessage(tabId, message, { documentId });
 }
 
-async function reader(tabId: number, documentId: string, message: ReaderRequest) {
-  const grant = await getGrant(tabId, 'reader');
-  if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) return failure('stale');
-  if (message.type === 'closed') {
-    await onTab(tabId, () => clearGrant(tabId, 'reader', message.sessionId));
-    return success(null);
-  }
-  if (message.type === 'resize' && Number.isFinite(message.ratio)) {
-    await updateSettings((settings) => ({ ...settings, ratio: clampRatio(message.ratio) }));
-    return success(null);
-  }
-  if (message.type !== 'batch' || typeof message.batchId !== 'string' || !validItems(message.items)) {
-    return failure('invalid-response');
-  }
-  return queueBatch(tabId, 'reader', grant, message);
+async function reader(tabId: number, documentId: string, senderUrl: string | undefined, message: ReaderRequest) {
+  // Order grant checks and job insertion with cancellation without waiting on the provider in the tab queue.
+  const accepted = await onTab(tabId, async () => {
+    const grant = await getGrant(tabId, 'reader');
+    if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) {
+      return { result: failure('stale') };
+    }
+    if (message.type === 'closed') {
+      await clearGrant(tabId, 'reader', message.sessionId);
+      return { result: success(null) };
+    }
+    if (message.type === 'resize' && Number.isFinite(message.ratio)) {
+      await updateSettings((settings) => ({ ...settings, ratio: clampRatio(message.ratio) }));
+      return { result: success(null) };
+    }
+    if (message.type === 'cancel' && typeof message.batchId === 'string') {
+      const key = grantKey(tabId, 'reader');
+      const job = jobs.get(key);
+      if (job?.sessionId === message.sessionId && job.batchId === message.batchId) {
+        job.controller.abort();
+        jobs.delete(key);
+      }
+      return { result: success(null) };
+    }
+    if (message.type !== 'batch' || typeof message.batchId !== 'string' || !validItems(message.items) ||
+        (message.pageUrl !== undefined && typeof message.pageUrl !== 'string')) {
+      return { result: failure('invalid-response') };
+    }
+    if (message.pageUrl !== undefined && senderUrl &&
+        readReaderPage(message.pageUrl)?.key !== readReaderPage(senderUrl)?.key) {
+      return { result: failure('stale') };
+    }
+    return { result: queueBatch(tabId, 'reader', grant, message) };
+  });
+  return accepted.result;
 }
 
 async function selection(tabId: number, documentId: string, url: string | undefined, message: SelectionRequest) {
@@ -435,6 +457,19 @@ async function queueBatch(tabId: number, kind: SessionKind, grant: Grant, messag
   }
 }
 
+async function verifyReaderPage(tabId: number, grant: Grant, pageUrl: string | undefined) {
+  const initial = readReaderPage(grant.pageUrl);
+  const expected = readReaderPage(pageUrl ?? grant.pageUrl);
+  if (!initial || !expected || initial.origin !== expected.origin) return failure('stale');
+  const tab = await browser.tabs.get(tabId).catch(() => undefined);
+  if (!tab?.url) return failure('stale');
+  const actual = readReaderPage(tab.url);
+  if (!actual) return failure('unsupported-page');
+  if ((pageUrl === undefined && tab.url !== grant.pageUrl) || actual.key !== expected.key) return failure('stale');
+  if (actual.sensitive && actual.key !== initial.key) return failure('sensitive-site');
+  return undefined;
+}
+
 async function translate(tabId: number, kind: SessionKind, grant: Grant, message: Batch, signal: AbortSignal) {
   const settings = await getSettings();
   const provider = grant.provider ?? 'google';
@@ -445,12 +480,22 @@ async function translate(tabId: number, kind: SessionKind, grant: Grant, message
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
   if (kind === 'selection' && (await browser.tabs.get(tabId)).url !== grant.pageUrl) return failure('stale');
   if (signal.aborted || (await getSettings()).revision !== grant.revision) return failure('stale');
+  if (kind === 'reader') {
+    const pageFailure = await verifyReaderPage(tabId, grant, message.pageUrl);
+    if (pageFailure) return pageFailure;
+  }
+  if (signal.aborted) return failure('stale');
   const request = {
     source: grant.session.source, target: grant.session.target, range: grant.session.range,
     id: message.batchId, items: message.items,
   };
   const result = await translateWithProvider(provider, settings, request, signal);
-  return signal.aborted || (await getSettings()).revision !== grant.revision ? failure('stale') : result;
+  if (signal.aborted || (await getSettings()).revision !== grant.revision) return failure('stale');
+  if (kind === 'reader') {
+    const pageFailure = await verifyReaderPage(tabId, grant, message.pageUrl);
+    if (pageFailure) return pageFailure;
+  }
+  return signal.aborted ? failure('stale') : result;
 }
 
 function translateWithProvider(provider: ProviderId, settings: Settings, request: TranslationBatch, signal: AbortSignal) {

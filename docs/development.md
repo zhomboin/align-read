@@ -12,7 +12,7 @@
    ```
 
 2. 在桌面 Chrome 116 或更新版本中打开 `chrome://extensions`，启用开发者模式，选择「加载已解压的扩展程序」，选择扩展目录下的 `.output/chrome-mv3`。使用 Windows Chrome 时，在文件选择器中通过 `\\wsl.localhost` 浏览到 Ubuntu 中的构建目录。
-3. 按 [配置与使用说明](../README.md#配置翻译和开始使用) 在扩展设置中配置开发用翻译服务并测试连接。凭据保存在本机扩展设置中。修改代码后，从扩展目录重新运行 `npm run build`，在 `chrome://extensions` 点击「重新加载」，再刷新测试网页。
+3. 按 [配置与使用说明](../README.md#配置翻译和开始使用) 在扩展设置中配置开发用翻译服务并测试连接。凭据保存在本机扩展设置中。修改代码后，从当前开发工作树的扩展目录重新运行 `npm run build`。在 `chrome://extensions` 核对加载目录，点击「重新加载」。刷新每个已打开的测试网页，再重新开启双栏。
 
 ## AI 翻译验证
 
@@ -47,6 +47,8 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 验证结束后在启动测试服务的终端按 `Ctrl+C`。自动化回归命令见 [发布验收](test-plan.md#运行)，打包和远程分发步骤见 [Chrome 网上应用店上架](chrome-web-store.md)。
 
+在开发环境验证 SPA 时，按 [SPA 验收](test-plan.md#spa-验收) 检查页面内更新、站内换页及原页恢复。
+
 ## 提交与回归
 
 从最新的 `main` 创建开发分支。修改设置界面时，在扩展目录执行下面的定向检查。若浏览器不在 PATH，按 [测试计划](test-plan.md#运行) 设置 `CHROMIUM_BIN`。
@@ -71,6 +73,14 @@ npm run test:selection
 npm run check
 npm run build
 npm run test:layout
+```
+
+修改 SPA 路由、动态提取或后台页面授权时，在扩展目录检查类型、构建并运行 SPA 定向测试。
+
+```bash
+npm run check
+npm run build
+npm run test:spa
 ```
 
 推送开发分支并向 `main` 发起 PR。检查 PR 的 **AlignRead regression** 结果，完成代码检视后再合入。全量回归和 ZIP 完整性检查由 GitHub Actions 执行。

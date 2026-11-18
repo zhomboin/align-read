@@ -61,7 +61,9 @@ type Column = { start: number; end: number; bounds: DOMRect };
 type NavigationLayout = { style: 'links' | 'tabs'; direction: 'ltr' | 'rtl'; vertical: boolean };
 type NavigationItem = { control: HTMLElement; bounds: DOMRect; current: boolean };
 
-export async function extractArticle(range: ReadingRange, signal: AbortSignal, sidebar?: SidebarLayout): Promise<Article> {
+export async function extractArticle(
+  range: ReadingRange, signal: AbortSignal, sidebar?: SidebarLayout, skipText?: (node: Text) => boolean,
+): Promise<Article> {
   const mainOnly = range === 'main';
   const scope = (mainOnly ? mainContent() : undefined) ?? document.body;
   const blocks: Block[] = [];
@@ -79,6 +81,7 @@ export async function extractArticle(range: ReadingRange, signal: AbortSignal, s
   }
 
   function block(source: HTMLElement, tag: Block['tag'], runs: Run[]) {
+    if (skipText) runs = runs.filter((run) => run === lineBreak || !skipText(run.node));
     const textRuns = runs.filter((run) => run !== lineBreak);
     if (!textRuns.some((run) => run.text.trim())) return undefined;
     const id = 'b' + (blocks.length + 1);

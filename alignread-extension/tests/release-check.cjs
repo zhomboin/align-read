@@ -10,10 +10,12 @@ const {checkSettings} = require('./settings-check.cjs');
 const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
 const {checkInlineRow} = require('./inline-row-check.cjs');
 const {checkAiPresets} = require('./ai-presets-check.cjs');
+const {checkSpaBrowser, checkSpaWorker, spaFixturePath} = require('./spa-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
 const layoutOnly = process.argv.includes('--layout');
+const spaOnly = process.argv.includes('--spa');
 const build = process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
@@ -347,7 +349,7 @@ async function checkBrowser() {
     if (method === 'Fetch.requestPaused') {
       const {pathname} = new URL(params.request.url);
       const relative = pathname === '/' ? '/options.html' : pathname;
-      const file = path.join(build, relative);
+      const file = pathname === spaFixturePath ? path.join(__dirname, 'fixtures/spa.html') : path.join(build, relative);
       const content = fs.existsSync(file) ? fs.readFileSync(file) : undefined;
       const type = {'.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png'}[path.extname(file)];
       const contentType = type === 'image/png' ? type : (type ?? 'text/plain') + '; charset=utf-8';
@@ -384,6 +386,7 @@ async function checkBrowser() {
       source: `(${initBrowser})(${JSON.stringify(manifest.version)}, ${selectionPopupTab})`,
     });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
+    if (spaOnly) return await checkSpaBrowser({page, evaluate, until, build});
     if (!layoutOnly) {
       if (!settingsOnly) {
         await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
@@ -815,6 +818,7 @@ async function checkBrowser() {
       console.log(JSON.stringify({paragraphs: count, feedbackMs: feedback, completeMs:complete}));
       await evaluate('readerCommand({type:"reader:stop"})');
     }
+    if (!layoutOnly) await checkSpaBrowser({page, evaluate, until, build});
 
 
   } finally {
@@ -945,8 +949,12 @@ function initBrowser(version, tabId) {
 }
 async function run() {
   if (layoutOnly) return checkBrowser();
-  if (selectionOnly || settingsOnly) startWorker();
+  if (selectionOnly || settingsOnly || spaOnly) startWorker();
   else await checkWorker();
+  if (!selectionOnly && !settingsOnly) {
+    await checkSpaWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
+  }
+  if (spaOnly) return checkBrowser();
   if (!selectionOnly) {
     const aiWorker = {request, dispatch, settings, tabs, grants, session, calls, until, setResponse, revokePermission, local, streamState};
     await checkAiWorker(aiWorker);
