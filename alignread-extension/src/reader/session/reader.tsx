@@ -17,6 +17,7 @@ import { createTranslation } from './translation';
 export type ActiveReader = {
   id: string; state: () => ReaderState; close: () => void;
   pause: () => void; resume: () => void; clearCache: (disable?: boolean) => void;
+  retry?: () => void;
 };
 
 const refreshDelay = 80;
