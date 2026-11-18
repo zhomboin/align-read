@@ -41,6 +41,7 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 - 两处重复原文分别定位正确，链接、锚点、折叠区和文本选择可用，关闭双栏后原页恢复。
 - 网格列表、提示框、折叠摘要、图注和宽表格在默认及较窄译文栏中可用。
+- 新闻条的标签、分隔符和链接同排显示。缩窄译文栏时，长链接在自己的位置换行。
 - 两个标签页可独立启停，关闭或刷新页面会清理译文。检查窄窗口、禁用站点、缺少授权、服务鉴权及失败重试。
 - 开启选词翻译，分别在普通网页和双栏原文选择文字。点击「译」，检查原文、译文、复制、重试、Esc 关闭和选区保留。选取编辑区或隐藏内容时，检查界面与翻译请求。
 
@@ -62,6 +63,14 @@ npm run test:settings
 npm run check
 npm run build
 npm run test:selection
+```
+
+修改双栏提取或显示时，在扩展目录检查类型、构建并运行双栏定向测试。
+
+```bash
+npm run check
+npm run build
+npm run test:layout
 ```
 
 推送开发分支并向 `main` 发起 PR。检查 PR 的 **AlignRead regression** 结果，完成代码检视后再合入。全量回归和 ZIP 完整性检查由 GitHub Actions 执行。

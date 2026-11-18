@@ -110,6 +110,7 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
     const style: CSSProperties & { '--reading-list-width'?: string } = {
       ...node.surface, flexGrow: node.columnWeight, textAlign: node.align,
       captionSide: node.captionSide, listStyleType: node.marker,
+      justifyContent: node.inlineRow?.align,
     };
     if (node.listColumns) {
       style['--reading-list-width'] = `calc((100% - ${node.listColumns - 1} * .75em) / ${node.listColumns})`;
@@ -118,7 +119,9 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
       key, 'aria-label': node.label, colSpan: node.span, rowSpan: node.rowSpan, start: node.start,
       scope: node.scope, reversed: node.reversed, value: node.listValue,
       'data-sidebar-side': node.side, 'data-reading-area': node.area,
-      'data-reading-columns': node.columns, dir: node.columns ?? node.navigation?.direction,
+      'data-reading-columns': node.columns,
+      'data-reading-inline-row': Boolean(node.inlineRow) || undefined,
+      dir: node.columns ?? node.inlineRow?.direction ?? node.navigation?.direction,
       'data-reading-navigation': node.navigation?.style,
       'data-vertical': node.navigation?.vertical || undefined,
       'aria-current': node.current || undefined,
@@ -142,7 +145,7 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
     key: node.id, 'data-reader-block': node.id, 'data-state': state,
     tabIndex: 0, 'aria-keyshortcuts': 'Enter',
     'data-reading-summary': node.tag === 'summary' || undefined,
-    style: node.whiteSpace ? { whiteSpace: node.whiteSpace } : undefined,
+    style: { ...node.inlineAppearance, whiteSpace: node.whiteSpace },
     ref: (element: HTMLElement | null) => {
       if (element) props.targets.set(node.id, element);
       else props.targets.delete(node.id);

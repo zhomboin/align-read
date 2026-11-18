@@ -8,10 +8,12 @@ const {setTimeout: wait} = require('node:timers/promises');
 const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require('./selection-check.cjs');
 const {checkSettings} = require('./settings-check.cjs');
 const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
+const {checkInlineRow} = require('./inline-row-check.cjs');
 const {checkAiPresets} = require('./ai-presets-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
+const layoutOnly = process.argv.includes('--layout');
 const build = process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
@@ -275,7 +277,7 @@ async function checkWorker() {
 
 }
 
-async function checkOptions() {
+async function checkBrowser() {
   const program = process.env.CHROMIUM_BIN ?? 'chromium';
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'alignread-options-'));
   const child = spawn(program, ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
@@ -382,14 +384,16 @@ async function checkOptions() {
       source: `(${initBrowser})(${JSON.stringify(manifest.version)}, ${selectionPopupTab})`,
     });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
-    if (!settingsOnly) {
-      await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
-      await checkSelectionPage({page, evaluate, until, build, initReader});
+    if (!layoutOnly) {
+      if (!settingsOnly) {
+        await checkSelectionPopup({page, evaluate, until, request, saveYoudao, tabs, grants, calls, youdaoOrigin, tabId: selectionPopupTab});
+        await checkSelectionPage({page, evaluate, until, build, initReader});
+      }
+      if (selectionOnly) return;
+      await checkSettings({page, evaluate, until, manifest, request, local, grants,
+        setPermission: (value) => { permitted = value; }, setResponse});
+      if (settingsOnly) return;
     }
-    if (selectionOnly) return;
-    await checkSettings({page, evaluate, until, manifest, request, local, grants,
-      setPermission: (value) => { permitted = value; }, setResponse});
-    if (settingsOnly) return;
 
     await page('Page.navigate', {url: 'about:blank'});
     await until(() => evaluate('location.href === "about:blank"'));
@@ -679,6 +683,7 @@ async function checkOptions() {
       imageLoads: 0, spans: true, tableStyle: true,
     });
     assert.equal(await evaluate('readerPayloads.flat().some(text => /Hidden disclosure text|Image description only|Ctrl\\+K/.test(text))'), false);
+    await checkInlineRow({evaluate, until});
 
     await page('Emulation.setDeviceMetricsOverride', {width: 1024, height: 900, deviceScaleFactor: 1, mobile: false});
     await until(() => evaluate('pane.querySelector(".scroll").clientWidth <= 512'));
@@ -903,8 +908,8 @@ function initReader() {
         return {ok:false, error:'rate-limit'};
       }
       if (readerMode === 'partial') {
-        readerMode = 'success';
-        items = items.slice(1);
+        items = items.filter(({text}) => text !== 'Reading an API reference');
+        if (items.length < message.items.length) readerMode = 'success';
       }
       if (readerMode === 'slow') await new Promise(resolve => setTimeout(resolve, 150));
       return {ok:true, value: {id:message.batchId, items:items.map(({id,text}) => ({id,text:'译 ' + text}))}};
@@ -939,6 +944,7 @@ function initBrowser(version, tabId) {
   };
 }
 async function run() {
+  if (layoutOnly) return checkBrowser();
   if (selectionOnly || settingsOnly) startWorker();
   else await checkWorker();
   if (!selectionOnly) {
@@ -948,7 +954,7 @@ async function run() {
     await checkAiPresets(aiWorker);
   }
   if (!settingsOnly) await checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until});
-  await checkOptions();
+  await checkBrowser();
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; });

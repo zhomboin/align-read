@@ -4,6 +4,8 @@
 
 双栏和选词支持 [ChatGPT（OpenAI）、Gemini、Grok、GLM、Kimi、豆包、腾讯混元、DeepSeek、MiniMax 和自定义 AI](translation-services.md)。新增预设使用模拟接口验证；真实接口验收按[本地开发步骤](development.md#ai-翻译验证)执行。
 
+双栏译文支持新闻条横排和窄栏内长链接换行。 [译文样式验收](test-plan.md#译文样式覆盖)
+
 - 商店分发前按[上架指南](chrome-web-store.md)部署对应的隐私政策并核对截图和 ZIP。
 - [测试与验收](test-plan.md)列出选词翻译和双栏回归。 [上架材料](chrome-web-store.md)提供打包与更新步骤。
 - 后续产品功能为 SPA 动态内容兼容。 [产品需求](AlignRead_PRD_v1.1.md#14-里程碑与当前进度) · [版本记录](version.md)
