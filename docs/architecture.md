@@ -1,22 +1,23 @@
 # AlignRead（对阅）实现架构
 
-本文记录双栏与选词翻译实现。功能范围见 [产品需求](AlignRead_PRD_v1.1.md)，兼容性与发布进度见 [测试计划](test-plan.md)。
+本文记录双栏、原位和选词翻译的实现。 [产品需求](AlignRead_PRD_v1.1.md) · [测试与验收](test-plan.md)
 
 ## 1. 已实现功能
 
 | 范围 | PRD | 实际交付 |
 | --- | --- | --- |
-| 操作入口 | F-01、F-08 | Popup 开启、暂停、恢复和关闭；切换语言与提取范围；Options 管理 Provider、缓存、站点禁用和阅读偏好 |
+| 操作入口 | F-01、F-08 | 弹窗选择模式、语言和提取范围，控制当前标签页的翻译。设置页管理服务、缓存、站点禁用和阅读偏好 |
 | 双栏阅读 | F-02、F-03 | 左栏保留真实原网页及原有交互；右栏是独立滚动的结构化只读译文；分隔条可拖动，默认各半，左栏可调范围为 35%–70% |
 | 原译对齐 | F-04、F-05 | 段落级双向悬停高亮、直接点击定位和按锚点联动。译文支持 Enter 定位，同步默认开启 |
 | 翻译执行 | F-06 | 支持 Google Cloud Translation Basic、有道智云、自定义 AI 和[官方 AI 服务](translation-services.md)。分批翻译、增量展示、失败可重试，多个标签页独立运行 |
 | 恢复与边界 | F-07、F-08 | 关闭和失效时清理扩展的页面改动；受限页面和布局冲突给出原因；外发前确认，排除敏感输入 |
-| 选词翻译 | F-09 | 独立按标签页启停。选中原文后按需翻译，卡片支持复制、重试和关闭 |
+| 选词翻译 | F-09 | 独立按标签页启停。按需翻译选中的可见文字，卡片支持复制、重试和关闭 |
+| 原位翻译 | F-11 | 在原网页写入译文，保留原有标签、链接、样式和交互。弹窗可恢复原文 |
 | 单页应用 | F-13 | 原页内容变动时更新译文。站内换页后清除旧译文，等待新正文并继续翻译 |
 
-默认源语言自动检测，目标为简体中文。默认范围是页面中可见且可阅读的文字，包含可识别的导航、侧栏和页脚，范围覆盖可滚动页面。用户可切换为仅正文。MVP 发布以 AC-01 至 AC-16 为准。
+默认模式为双栏对照，自动检测源语言并译为简体中文。默认范围包含可滚动页面中可读的导航、侧栏、正文和页脚。用户可切换为仅正文。
 
-后续 P1 包括原文下方插入译文、替换式翻译及句子级对齐。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。原生 PDF、受限浏览器页面、iframe 和 Canvas 内容按 PRD 边界处理。
+后续 P1 包括原文下方插入译文及句子级对齐。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。原生 PDF、受限浏览器页面、iframe 和 Canvas 内容按 PRD 边界处理。
 
 ## 2. 技术基线与代码结构
 
@@ -33,7 +34,7 @@ alignread-extension/
     options/                   # 全局配置、站点规则和隐私设置
   src/
     reader/
-      session/                 # 页面会话、任务队列、页面生命周期
+      session/                 # 双栏与原位会话、任务队列、文字替换与恢复
       extraction/              # 提取、过滤、分段和结构化阅读树
       layout/                  # 分栏、分隔条、页面改动记录和恢复
       alignment/               # 源节点映射、高亮、定位与滚动联动
@@ -46,6 +47,7 @@ alignread-extension/
   tests/
     release-check.cjs          # 检查生产构建，运行 Worker 和 Chromium 回归
     selection-check.cjs        # AC-P1-01 及选词边界用例
+    replacement-check.cjs      # AC-P1-03 及原位翻译回归
     spa-check.cjs              # AC-P1-05 及动态内容、路由与授权回归
     fixtures/                  # 本地测试页面和结构样本
 ```
@@ -53,13 +55,15 @@ alignread-extension/
 | 运行上下文 | 持有的状态与职责 |
 | --- | --- |
 | Popup / Options | 工具栏弹窗操作当前文档。独立标签页中的设置按翻译服务、双栏阅读、站点与缓存分区，阅读与站点偏好按分类保存。两者都通过 Worker 处理请求。弹窗关闭后翻译继续。 |
-| Content Script | 每个顶层文档独立持有双栏和选词会话。各自使用 Shadow DOM 挂载界面，双栏负责段落映射、任务队列和会话缓存。 |
+| Content Script | 每个顶层文档最多拥有一个双栏或原位会话，以及独立的选词会话。双栏和选词通过 Shadow DOM 挂载界面，原位翻译直接写入现有文字节点。 |
 | Service Worker | 接收扩展操作、执行注入、管理授权和设置、核验来自页面的请求、执行 Provider 批次并统一限流。 |
 | Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在各自会话内存。 |
 
-双栏和选词脚本均由 Worker 用 `chrome.scripting.executeScript` 按需注入。状态查询没有回复或发送失败时，注入对应脚本。同一文档内已加载的脚本可复用。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
+Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发送失败时，注入对应脚本。同一文档内可复用已加载的脚本。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
 
-## 3. 双栏与段落映射
+## 3. 网页翻译与段落映射
+
+### 双栏对照
 
 **左栏布局。** Reader 创建固定在右侧的宿主元素，工具栏、分隔条和译文挂载在闭合 Shadow DOM 内。用可撤销的样式表将原页的 `body` 约束为左侧独立滚动容器，保留原有 DOM 树。布局模块识别原页的目录和正文列，对溢出子元素以及固定页边栏、Cookie 提示条等应用受控的尺寸或位置调整。启动时先校验分栏布局，通过后才派发翻译请求。运行中发生短暂布局变动时，尝试恢复分栏。视口低于 960 CSS px 或布局持续无法安全恢复时，退出双栏并提示原因。
 
@@ -77,12 +81,20 @@ alignread-extension/
 
 **联动。** 两侧注册各自的滚动上下文，按段落 ID 选取视口锚点，通过动画帧合并更新。程序化滚动使用短期抑制标记，收到对侧真实用户输入时转移主导侧。等待、失败与跳过的块保留布局与定位锚点。原文高亮优先使用 CSS Custom Highlight 和 Range；兼容回退可采用不接收指针事件的描边。原文与译文均可直接点击普通文字定位对侧，译文块可用 Tab 聚焦并按 Enter。链接、重试按钮和拖选文字保留各自操作。
 
+### 原位翻译
+
+原位会话复用可见文字提取、段落身份和翻译队列。按文字节点边界送译，保留原网页的标签、属性、样式和事件。跨标签的句子可能拆开送译。原位模式在窄窗口也可使用。 [文字提取](../alignread-extension/src/reader/extraction/document.ts) · [原位会话](../alignread-extension/src/reader/session/replacement-reader.ts)
+
+扩展在会话内存记录每个已改节点的原文和最后写入的译文。应用译文前检查节点仍在页面上、原文与提取时一致且仍可翻译。动态提取读取已改节点的原文，避免将译文再次送译。等待或失败的段落继续显示原文。 [文字替换记录](../alignread-extension/src/reader/session/replacement-text.ts)
+
+关闭、切换模式或站内换页时先处理网站的文字更新，再恢复扩展仍控制的节点。切换路径或哈希路由会取消旧批次并清空缓存，新页面可继续翻译。识别为敏感的新页面会结束会话，需要重新确认。
+
 ## 4. 会话与消息协议
 
 | 协议 | 方向 | 关键约束 |
 | --- | --- | --- |
-| `page`、`start`、`control` | Popup → Worker | Worker 校验标签页、服务配置和页面授权。注入 Reader 后把操作绑定到浏览器返回的 `documentId`。 |
-| `reader:start`、`reader:state`、`reader:pause`、`reader:resume`、`reader:stop` | Worker → Reader | 定向操作当前文档的 Reader 会话。 |
+| `page`、`start`、`control` | Popup → Worker | Worker 校验模式、标签页、服务配置和页面授权。注入 Reader 后把操作绑定到浏览器返回的 `documentId`。 |
+| `reader:start`、`reader:state`、`reader:pause`、`reader:resume`、`reader:retry`、`reader:stop` | Worker → Reader | 当前文档的 Reader 按模式启动并回报当前模式及进度。重试命令用于原位翻译。 |
 | `batch`、`cancel` | Reader → Worker | Worker 核验发送者的标签页、文档及会话，检查批次内容、配置、翻译授权和当前页面路由。取消时只停止对应的批次。 |
 | 批次响应 | Worker → Reader | Worker 返回批次 ID 和翻译项 ID。Reader 只把结果归入当前页面仍有效的阅读块，处理超时、结果缺失或取消。 |
 | `closed`、`resize` | Reader → Worker | 当前文档关闭会话或保存栏宽偏好。关闭后 Worker 取消对应在途任务并移除临时授权。 |
@@ -91,11 +103,11 @@ alignread-extension/
 | `selection:start`、`selection:state`、`selection:stop` | Worker → 选词脚本 | 绑定到当前文档，挂载、查询或清理选词界面。 |
 | `selection:translate`、`selection:cancel`、`selection:closed` | 选词脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
 
-每次开启生成独立会话 ID。Worker 维护标签页、文档及开启地址的授权，Reader 维护阅读树、翻译项与段落映射。Worker 在请求前后比对批次路由与浏览器提供的当前地址。刷新、跨文档导航、`pagehide` 或关闭会令旧会话失效。切换翻译服务后需重新开启。切换标签页只改变 Popup 的操作目标，各文档的翻译独立进行。
+每次开启生成独立会话 ID。Worker 维护标签页、文档及开启地址的授权，Reader 维护翻译项和文字映射。Worker 在请求前后比对批次路由与浏览器提供的当前地址。刷新、跨文档导航、`pagehide` 或关闭会令旧会话失效。切换翻译服务后需重新开启。切换标签页只改变 Popup 的操作目标，各文档的翻译独立进行。
 
 Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、`error`。无活动会话时显示原文。暂停停止派发后续批次，在途批次可完成。关闭立即阻止迟到结果应用，Worker 中断或请求失败的批次可重试。
 
-选词脚本过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，卡片在双栏之上显示。界面和会话各自清理，选词译文仅保留在当前卡片内存。
+选词脚本读取选区显示的文字，过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，卡片在双栏之上显示。界面和会话各自清理，选词译文仅保留在当前卡片内存。
 
 ## 5. Provider、缓存与权限
 
@@ -116,7 +128,7 @@ Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、
 | M2 真实翻译 | Provider 接入、外发确认、调度、缓存、错误反馈和多标签隔离 | 验证部分失败、关闭/导航、多标签、授权与敏感输入（AC-08 至 AC-15）；模拟 Worker 中断并核对批次状态 |
 | M3 稳定与发布 | 实测普通博客、技术文档及 README，验证长页性能和分发权限 | 通过 AC-01 至 AC-16；记录 100、500、1000 段表现和点击到初次反馈的时间，确认最低 Chrome 版本及站点适配范围 |
 
-选词翻译按 AC-P1-01 验收，SPA 动态更新按 AC-P1-05 验收。GitHub Actions 执行 Chromium、Worker 和 ZIP 全量回归。最低支持版本在 Manifest 中声明为 Chrome 116。 [回归与验收](test-plan.md)
+选词翻译按 AC-P1-01 验收，原位翻译按 AC-P1-03 验收，SPA 动态更新按 AC-P1-05 验收。GitHub Actions 执行 Chromium、Worker 和 ZIP 全量回归。最低支持版本在 Manifest 中声明为 Chrome 116。 [回归与验收](test-plan.md)
 
 ## 参考资料
 

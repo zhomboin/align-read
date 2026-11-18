@@ -10,6 +10,7 @@ export const LANGUAGES = {
 export type Language = keyof typeof LANGUAGES;
 export type SourceLanguage = Language | 'auto';
 export type ReadingRange = 'visible' | 'main';
+export type ReaderMode = 'dual' | 'replace';
 export type ReadingOptions = { source: SourceLanguage; target: Language; range: ReadingRange };
 export type Preferences = ReadingOptions & {
   ratio: number;
@@ -50,7 +51,7 @@ export const defaults: Preferences = {
 export const LIMITS = { batchItems: 24, batchChars: 4500, minRatio: .35, maxRatio: .7 };
 
 export const errors = {
-  'unsupported-page': '此页面无法开启双栏阅读。',
+  'unsupported-page': '此页面无法使用网页翻译。',
   'site-disabled': '此站点已在设置中禁用。',
   'sensitive-site': '此页面可能包含敏感内容。请确认可发送页面文本后再开启。',
   'not-configured': '请在设置中填写当前翻译服务的凭据。',
@@ -59,7 +60,7 @@ export const errors = {
   'layout-start': '网页布局检查未通过，已恢复原网页。本次尚未发送网页文本进行翻译。',
   'incompatible': '双栏布局已失效，已恢复原网页。',
   'no-text': '未找到可翻译的可见文本。',
-  'changed': '原网页内容已变化，请重新开启双栏。',
+  'changed': '原网页内容已变化，请重新开启翻译。',
   'authentication': '翻译服务拒绝了请求，请检查凭据和 API 开通状态。',
   'quota': '翻译服务的配额或计费不可用。',
   'unsupported-language': '翻译服务不支持此语言设置。',
@@ -71,9 +72,9 @@ export const errors = {
   'ai-config': '请填写有效的 HTTPS Chat Completions 地址、模型和 API 密钥。',
   'ai-endpoint': 'AI 服务找不到接口或模型，请检查地址和模型名称。',
   'provider-error': '翻译服务暂时无法处理该请求。',
-  'provider-changed': '当前翻译服务已切换，请重新开启双栏。',
+  'provider-changed': '当前翻译服务已切换，请重新开启翻译。',
   'config-changed': '翻译配置在测试期间发生变化，请重新测试。',
-  'stale': '本次翻译已结束，请重新开启双栏。',
+  'stale': '本次翻译已结束，请重新开启翻译。',
   'unavailable': '当前页面连接已中断，请刷新页面后重试。',
 } as const;
 
@@ -85,6 +86,7 @@ export const failure = (error: ErrorCode): Failure => ({ ok: false, error });
 
 export type Session = ReadingOptions & {
   id: string;
+  mode?: ReaderMode;
   pageUrl?: string;
   ratio: number;
   syncScroll: boolean;
@@ -94,6 +96,7 @@ export type Session = ReadingOptions & {
 export type TaskStatus = 'preparing' | 'translating' | 'paused' | 'partial' | 'ready' | 'error';
 export type ReaderState = {
   status: TaskStatus; done: number; total: number; failed: number; error?: ErrorCode; cacheBytes?: number;
+  mode?: ReaderMode;
 };
 export type PageState = {
   settings: PublicSettings; reader: ReaderState | null; selectionEnabled: boolean;
@@ -102,12 +105,15 @@ export type PageState = {
 export type TranslationItem = { id: string; text: string };
 export type BatchResult = { id: string; items: TranslationItem[] };
 
+export type ReaderControl = 'pause' | 'resume' | 'retry' | 'stop';
+type StartTranslation = { tabId: number; provider: ProviderId; options: ReadingOptions; confirmSensitive: boolean };
 export type PopupMessage =
   | { type: 'page'; tabId: number }
   | { type: 'switch-provider'; tabId: number; provider: ProviderId }
-  | { type: 'start' | 'selection-start'; tabId: number; provider: ProviderId; options: ReadingOptions; confirmSensitive: boolean }
+  | (StartTranslation & { type: 'start'; mode?: ReaderMode })
+  | (StartTranslation & { type: 'selection-start' })
   | { type: 'selection-stop'; tabId: number }
-  | { type: 'control'; tabId: number; command: 'pause' | 'resume' | 'stop' };
+  | { type: 'control'; tabId: number; command: ReaderControl };
 export type OptionsMessage =
   | { type: 'settings' }
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
@@ -124,7 +130,7 @@ export type ReaderRequest =
   | { type: 'closed'; sessionId: string }
   | { type: 'resize'; sessionId: string; ratio: number };
 export type ReaderCommand =
-  | { type: 'reader:state' | 'reader:stop' | 'reader:pause' | 'reader:resume' }
+  | { type: 'reader:state' | `reader:${ReaderControl}` }
   | { type: 'reader:clear-cache'; disable?: boolean }
   | { type: 'reader:start'; session: Session };
 
@@ -142,6 +148,9 @@ export function selectedProviderAccess(settings: PublicSettings) {
 }
 export function isLanguage(value: unknown): value is Language {
   return typeof value === 'string' && Object.hasOwn(LANGUAGES, value);
+}
+export function isReaderMode(value: unknown): value is ReaderMode {
+  return value === 'dual' || value === 'replace';
 }
 export function isReadingOptions(value: unknown): value is ReadingOptions {
   return isRecord(value) && (value.source === 'auto' || isLanguage(value.source)) &&

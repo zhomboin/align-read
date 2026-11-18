@@ -10,9 +10,11 @@ export type Mark = (typeof inlineTags)[keyof typeof inlineTags];
 export type Piece = {
   id: string; text: string; translate: boolean; marks: Mark[]; href?: string; lineBreak?: true;
 };
+export type ReplacementFragment = string | Piece;
 export type Block = {
   id: string; tag: 'p' | 'pre' | 'figcaption' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'span' | 'summary';
   pieces: Piece[]; source: HTMLElement; range: Range; ranges: Range[]; snapshots: Map<Text, string>;
+  replacements?: Map<Text, ReplacementFragment[]>;
   whiteSpace?: ReturnType<typeof textWhiteSpace>;
   inlineAppearance?: ReturnType<typeof readInlineAppearance>;
 };
@@ -40,6 +42,11 @@ const excluded = [
   '[role=textbox]', '[role=button]', '[role=combobox]', '[role=dialog]', '[aria-hidden=true]', '[hidden]',
   '[data-alignread-host]', '[data-ad-slot]', 'dialog',
 ].join(',');
+const replacementExcluded = [
+  excluded, 'button', '[role=searchbox]', '[role=spinbutton]', '[role=slider]',
+  'code', 'kbd', 'samp', 'pre', '.monaco-editor', '.CodeMirror', '.cm-editor',
+  '[inert]', '[translate=no i]', '.notranslate', '[data-alignread-selection]',
+].join(',');
 const structural = new Set(['UL', 'OL', 'LI', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT',
   'TR', 'TD', 'TH', 'CAPTION', 'FIGURE', 'DETAILS', 'DL', 'DT', 'DD']);
 const surfaceContainers = new Set(['DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'MAIN', 'NAV', 'HEADER', 'FOOTER',
@@ -61,11 +68,19 @@ type Column = { start: number; end: number; bounds: DOMRect };
 type NavigationLayout = { style: 'links' | 'tabs'; direction: 'ltr' | 'rtl'; vertical: boolean };
 type NavigationItem = { control: HTMLElement; bounds: DOMRect; current: boolean };
 
+export function canReplaceText(node: Text) {
+  const parent = node.parentElement;
+  return node.getRootNode() === document && parent instanceof HTMLElement &&
+    !(parent instanceof HTMLDetailsElement && !parent.open) &&
+    replacementAllowed(parent) && visibleContext(parent);
+}
+
 export async function extractArticle(
   range: ReadingRange, signal: AbortSignal, sidebar?: SidebarLayout, skipText?: (node: Text) => boolean,
+  replacement?: { readText(node: Text): string },
 ): Promise<Article> {
   const mainOnly = range === 'main';
-  const scope = (mainOnly ? mainContent() : undefined) ?? document.body;
+  const scope = (mainOnly ? mainContent(replacement ? replacementAllowed : undefined) : undefined) ?? document.body;
   const blocks: Block[] = [];
   let visited = 0;
 
@@ -75,9 +90,13 @@ export async function extractArticle(
   }
 
   function allowed(element: HTMLElement) {
-    return !element.matches(excluded) &&
+    return (replacement ? replacementAllowed(element) : !element.matches(excluded)) &&
       (!mainOnly || element !== sidebar?.sidebarBranch &&
         (!element.matches(mainExcluded) || element.matches('[role=tablist]'))) && visible(element);
+  }
+
+  function sourceText(node: Text) {
+    return replacement?.readText(node) ?? node.data;
   }
 
   function block(source: HTMLElement, tag: Block['tag'], runs: Run[]) {
@@ -86,40 +105,8 @@ export async function extractArticle(
     if (!textRuns.some((run) => run.text.trim())) return undefined;
     const id = 'b' + (blocks.length + 1);
     const whiteSpace = tag === 'pre' ? undefined : textWhiteSpace(getComputedStyle(source));
-    let pieces: Piece[] = [];
-    const appendBreak = () => {
-      pieces.push({ id: id + 'p' + pieces.length, text: '', translate: false, marks: [], lineBreak: true });
-    };
-    for (const run of runs) {
-      if (run === lineBreak) {
-        appendBreak();
-        continue;
-      }
-      // Keep actual line boundaries local so a provider cannot collapse them.
-      const segments = tag !== 'pre' && whiteSpace
-        ? run.text.split(/(\r\n|\r|\n)/) : [run.text];
-      for (const [segmentIndex, segment] of segments.entries()) {
-        if (segmentIndex % 2) {
-          appendBreak();
-          continue;
-        }
-        for (const [index, text] of (run.translate ? segment.split(protectedText) : [segment]).entries()) {
-          if (!text) continue;
-          const translate = run.translate && index % 2 === 0 && word.test(text);
-          const previous = pieces.at(-1);
-          if (previous && !previous.lineBreak && previous.translate === translate && previous.href === run.href &&
-              previous.marks.join() === run.marks.join()) {
-            previous.text += text;
-          } else {
-            pieces.push({ id: id + 'p' + pieces.length, text, translate, marks: run.marks, href: run.href });
-          }
-        }
-      }
-    }
-
-    if (tag !== 'pre' && whiteSpace !== 'pre-wrap') {
-      pieces = pieces.map((piece) => ({ ...piece, text: piece.text.replace(/\s+/g, ' ') }));
-    }
+    const mapped = replacement ? replacementPieces(id, textRuns) : undefined;
+    const pieces = mapped?.pieces ?? readingPieces(id, tag, whiteSpace, runs);
     const range = new Range();
     range.setStart(textRuns[0]!.node, 0);
     const last = textRuns.at(-1)!.node;
@@ -129,8 +116,9 @@ export async function extractArticle(
       highlight.selectNodeContents(node);
       return highlight;
     });
-    const snapshots = new Map(textRuns.map(({ node }) => [node, node.data]));
+    const snapshots = new Map(textRuns.map(({ node, text }) => [node, replacement ? text : node.data]));
     const entry: Block = { id, tag, pieces, source, range, ranges, snapshots, whiteSpace };
+    if (mapped) entry.replacements = mapped.replacements;
     blocks.push(entry);
     return entry;
   }
@@ -138,7 +126,8 @@ export async function extractArticle(
   async function inline(node: Node, runs: Run[], marks: Mark[] = [], href?: string, locked = false) {
     await pulse();
     if (node instanceof Text) {
-      if (node.length) runs.push({ node, text: node.data, translate: !locked, marks, href });
+      const text = sourceText(node);
+      if (text) runs.push({ node, text, translate: !locked, marks, href });
       return;
     }
     if (!(node instanceof HTMLElement) || !allowed(node)) return;
@@ -245,7 +234,7 @@ export async function extractArticle(
     const columns: Column[] = [];
     const layout = parent.children.length > 1 && parent !== sidebar?.row && !structural.has(parent.tagName)
       ? getComputedStyle(parent) : undefined;
-    const inlineRow = layout && await readInlineRow(parent, layout);
+    const inlineRow = !replacement && layout && await readInlineRow(parent, layout);
     if (inlineRow) return [inlineRow];
     const flexOrGrid = /^(inline-)?(flex|grid)$/.test(layout?.display ?? '');
     let runs: Run[] = [];
@@ -257,7 +246,8 @@ export async function extractArticle(
     for (const child of displayedChildren(parent)) {
       await pulse();
       if (child instanceof Text) {
-        if (child.length) runs.push({ node: child, text: child.data, translate: true, marks: [] });
+        const text = sourceText(child);
+        if (text) runs.push({ node: child, text, translate: true, marks: [] });
         continue;
       }
       if (!(child instanceof HTMLElement) || !allowed(child)) continue;
@@ -269,7 +259,7 @@ export async function extractArticle(
       const area = !mainOnly && sidebar?.row === parent
         ? child === sidebar.sidebarBranch ? 'sidebar' : child === sidebar.content ? 'content' : undefined
         : undefined;
-      const couldBeNavigation = !area && child.matches('ul,ol,[role=tablist]');
+      const couldBeNavigation = !replacement && !area && child.matches('ul,ol,[role=tablist]');
       if (couldBeNavigation) flush();
       const navigation = couldBeNavigation ? await readNavigation(child) : undefined;
       const image = !area && placeholderFor(child);
@@ -327,14 +317,90 @@ export async function extractArticle(
     return arrangeColumns(result, columns, layout?.direction === 'rtl' ? 'rtl' : 'ltr');
   }
 
-  const nodes = visibleContext(scope) ? await visit(scope) : [];
+  const nodes = visibleContext(scope) && (!replacement || replacementAllowed(scope)) ? await visit(scope) : [];
   return { nodes, blocks, scope };
 }
 
-function mainContent() {
+function readingPieces(id: string, tag: Block['tag'], whiteSpace: Block['whiteSpace'], runs: Run[]) {
+  const pieces: Piece[] = [];
+  const appendBreak = () => {
+    pieces.push({ id: id + 'p' + pieces.length, text: '', translate: false, marks: [], lineBreak: true });
+  };
+  for (const run of runs) {
+    if (run === lineBreak) {
+      appendBreak();
+      continue;
+    }
+    // Keep actual line boundaries local so a provider cannot collapse them.
+    const segments = tag !== 'pre' && whiteSpace
+      ? run.text.split(/(\r\n|\r|\n)/) : [run.text];
+    for (const [segmentIndex, segment] of segments.entries()) {
+      if (segmentIndex % 2) {
+        appendBreak();
+        continue;
+      }
+      for (const [index, text] of (run.translate ? segment.split(protectedText) : [segment]).entries()) {
+        if (!text) continue;
+        const translate = run.translate && index % 2 === 0 && word.test(text);
+        const previous = pieces.at(-1);
+        if (previous && !previous.lineBreak && previous.translate === translate && previous.href === run.href &&
+            previous.marks.join() === run.marks.join()) {
+          previous.text += text;
+        } else {
+          pieces.push({ id: id + 'p' + pieces.length, text, translate, marks: run.marks, href: run.href });
+        }
+      }
+    }
+  }
+
+  return tag !== 'pre' && whiteSpace !== 'pre-wrap'
+    ? pieces.map((piece) => ({ ...piece, text: piece.text.replace(/\s+/g, ' ') }))
+    : pieces;
+}
+
+function replacementPieces(id: string, runs: TextRun[]) {
+  const pieces: Piece[] = [];
+  const replacements = new Map<Text, ReplacementFragment[]>();
+  for (const run of runs) {
+    if (!run.translate) continue;
+    const fragments: ReplacementFragment[] = [];
+    const previousLength = pieces.length;
+    for (const [lineIndex, line] of run.text.split(/(\r\n|\r|\n)/).entries()) {
+      if (lineIndex % 2) {
+        fragments.push(line);
+        continue;
+      }
+      for (const [index, text] of line.split(protectedText).entries()) {
+        if (!text) continue;
+        if (index % 2 || !word.test(text)) {
+          fragments.push(text);
+          continue;
+        }
+        const source = text.trim();
+        const start = text.indexOf(source);
+        const end = start + source.length;
+        if (start > 0) fragments.push(text.slice(0, start));
+        const piece: Piece = {
+          id: id + 'p' + pieces.length, text: source, translate: true, marks: run.marks, href: run.href,
+        };
+        pieces.push(piece);
+        fragments.push(piece);
+        if (end < text.length) fragments.push(text.slice(end));
+      }
+    }
+    if (pieces.length !== previousLength) replacements.set(run.node, fragments);
+  }
+  return { pieces, replacements };
+}
+
+function replacementAllowed(element: HTMLElement) {
+  return document.designMode !== 'on' && !element.closest(replacementExcluded);
+}
+
+function mainContent(allowed?: (element: HTMLElement) => boolean) {
   for (const selector of ['main, [role=main]', 'article']) {
     for (const element of document.querySelectorAll<HTMLElement>(selector)) {
-      if (!element.closest(mainExcluded) && visibleContext(element)) return element;
+      if (!element.closest(mainExcluded) && (!allowed || allowed(element)) && visibleContext(element)) return element;
     }
   }
 }

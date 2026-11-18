@@ -395,7 +395,7 @@ function Options() {
           <h3>会话缓存</h3>
           <label className="check"><input type="checkbox" checked={cache} disabled={busy}
             onChange={(event) => setCache(event.target.checked)} /><span>使用临时会话缓存</span></label>
-          <p className="hint" role="status">活跃会话约占 {(cacheBytes / 1024).toFixed(1)} KiB，关闭双栏后释放。</p>
+          <p className="hint" role="status">活跃会话约占 {(cacheBytes / 1024).toFixed(1)} KiB，结束网页翻译后释放。</p>
           <div className="actions">
             <button type="button" disabled={busy} onClick={() => void usage()}>刷新占用</button>
             <button type="button" disabled={busy} onClick={() => void clearCache()}>清空缓存</button>

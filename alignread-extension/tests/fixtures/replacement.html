@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>In-place reader fixture</title>
+</head>
+<body>
+  <nav>Outside the reading scope</nav>
+  <main>
+    <p id="mixed">  Read <a href="#anchor" title="Guide">the guide</a> with <strong>care</strong> and <code>loadItem()</code>.  </p>
+    <p id="adjacent"></p>
+    <p id="anchor">Original site paragraph</p>
+    <p id="site-owned">Site controlled phrase</p>
+    <p id="partial">Partial heading <strong>Failed fragment</strong></p>
+    <p hidden>Hidden phrase</p>
+    <p contenteditable>Editable value</p>
+    <form><label>Form label <input value="Input value"></label></form>
+    <pre>const untouched = true;</pre>
+  </main>
+</body>
+</html>

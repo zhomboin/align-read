@@ -11,11 +11,13 @@ const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('
 const {checkInlineRow} = require('./inline-row-check.cjs');
 const {checkAiPresets} = require('./ai-presets-check.cjs');
 const {checkSpaBrowser, checkSpaWorker, spaFixturePath} = require('./spa-check.cjs');
+const {checkReplacementBrowser, checkReplacementPopup, replacementFixturePath} = require('./replacement-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
 const settingsOnly = process.argv.includes('--settings');
 const layoutOnly = process.argv.includes('--layout');
 const spaOnly = process.argv.includes('--spa');
+const replacementOnly = process.argv.includes('--replace');
 const build = process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
@@ -91,9 +93,11 @@ function startWorker() {
         if (message.type === 'reader:start') {
           if (tab.layoutFailure) return {ok: false, error: 'layout-start'};
           tab.readerState = {status: 'preparing', total: 0, done: 0, failed: 0};
+          if (message.session.mode) tab.readerState.mode = message.session.mode;
           return {ok: true, value: tab.readerState};
         }
         if (message.type === 'reader:stop') delete tab.readerState;
+        if (message.type === 'reader:retry') tab.readerRetryMode = tab.readerState?.mode;
         return tab.readerState ?? null;
       },
     },
@@ -349,7 +353,8 @@ async function checkBrowser() {
     if (method === 'Fetch.requestPaused') {
       const {pathname} = new URL(params.request.url);
       const relative = pathname === '/' ? '/options.html' : pathname;
-      const file = pathname === spaFixturePath ? path.join(__dirname, 'fixtures/spa.html') : path.join(build, relative);
+      const fixture = pathname === spaFixturePath ? 'spa.html' : pathname === replacementFixturePath ? 'replacement.html' : null;
+      const file = fixture ? path.join(__dirname, 'fixtures', fixture) : path.join(build, relative);
       const content = fs.existsSync(file) ? fs.readFileSync(file) : undefined;
       const type = {'.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png'}[path.extname(file)];
       const contentType = type === 'image/png' ? type : (type ?? 'text/plain') + '; charset=utf-8';
@@ -386,6 +391,12 @@ async function checkBrowser() {
       source: `(${initBrowser})(${JSON.stringify(manifest.version)}, ${selectionPopupTab})`,
     });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
+    async function checkReplacement() {
+      await checkReplacementPopup({page, evaluate, until, request, saveYoudao, tabs, grants, session,
+        youdaoOrigin, tabId: selectionPopupTab});
+      await checkReplacementBrowser({page, evaluate, until, build});
+    }
+    if (replacementOnly) return await checkReplacement();
     if (spaOnly) return await checkSpaBrowser({page, evaluate, until, build});
     if (!layoutOnly) {
       if (!settingsOnly) {
@@ -818,9 +829,10 @@ async function checkBrowser() {
       console.log(JSON.stringify({paragraphs: count, feedbackMs: feedback, completeMs:complete}));
       await evaluate('readerCommand({type:"reader:stop"})');
     }
-    if (!layoutOnly) await checkSpaBrowser({page, evaluate, until, build});
-
-
+    if (!layoutOnly) {
+      await checkSpaBrowser({page, evaluate, until, build});
+      await checkReplacement();
+    }
   } finally {
     clearTimeout(watchdog);
     child.kill();
@@ -949,6 +961,7 @@ function initBrowser(version, tabId) {
 }
 async function run() {
   if (layoutOnly) return checkBrowser();
+  if (replacementOnly) { startWorker(); return checkBrowser(); }
   if (selectionOnly || settingsOnly || spaOnly) startWorker();
   else await checkWorker();
   if (!selectionOnly && !settingsOnly) {

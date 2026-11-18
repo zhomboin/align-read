@@ -11,7 +11,7 @@ import { youdao } from '../src/background/translation/youdao';
 import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
 import { readReaderPage } from '../src/shared/reader-page';
 import {
-  LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReadingOptions, isRecord,
+  LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReaderMode, isReadingOptions, isRecord,
   isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
@@ -306,16 +306,19 @@ async function popup(message: PopupMessage) {
   }
 
   if (message.type === 'control') {
-    if (!['stop', 'pause', 'resume'].includes(message.command)) return failure('unavailable');
+    if (!['stop', 'pause', 'resume', 'retry'].includes(message.command)) return failure('unavailable');
     const grant = await getGrant(tabId, 'reader');
     if (!grant) return success(null);
     if (message.command === 'stop') await clearGrant(tabId, 'reader', grant.session.id);
     return success(await send(tabId, grant.documentId, {
-      type: 'reader:' + message.command,
-    } as ReaderCommand).catch(() => null));
+      type: `reader:${message.command}`,
+    }).catch(() => null));
   }
 
   if ((message.type !== 'start' && message.type !== 'selection-start') || !isReadingOptions(message.options)) {
+    return failure('unavailable');
+  }
+  if (message.type === 'start' && message.mode !== undefined && !isReaderMode(message.mode)) {
     return failure('unavailable');
   }
   const kind = message.type === 'start' ? 'reader' : 'selection';
@@ -352,7 +355,7 @@ async function popup(message: PopupMessage) {
     source: message.options.source, target: message.options.target, range: message.options.range,
     id: crypto.randomUUID(), ratio: view.ratio,
     highlight: view.highlight, syncScroll: view.syncScroll, cache: view.cache && !sensitive,
-    ...(kind === 'reader' && { pageUrl: tab.url }),
+    ...(message.type === 'start' && { pageUrl: tab.url, mode: message.mode ?? 'dual' }),
   };
   await clearGrant(tabId, kind);
   await browser.storage.session.set({

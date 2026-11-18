@@ -4,8 +4,8 @@ import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
-  TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
-  type ErrorCode, type PageState, type ProviderId, type ReadingOptions, type ReaderState,
+  TRANSLATION_PROVIDERS, defaults, errors, isProviderId, isReaderMode, selectedProviderAccess,
+  type ErrorCode, type PageState, type ProviderId, type ReaderControl, type ReaderMode, type ReadingOptions, type ReaderState,
 } from '../../src/shared/reader-messages';
 import '../../src/shared/settings-controls.css';
 import './popup.css';
@@ -14,18 +14,26 @@ const progressLabels = {
   preparing: '正在提取页面内容', translating: '正在翻译', paused: '已暂停',
   partial: '已显示部分译文', ready: '翻译完成', error: '翻译遇到问题',
 };
+const modeLabels = {
+  dual: { name: '双栏对照', start: '开启双栏', switch: '切换为双栏', stop: '关闭双栏' },
+  replace: { name: '原位翻译', start: '开启原位翻译', switch: '切换为原位翻译', stop: '恢复原文' },
+};
 const providers = Object.keys(TRANSLATION_PROVIDERS).filter(isProviderId);
 
 function Popup() {
   const [tabId, setTabId] = useState<number>();
   const [page, setPage] = useState<PageState>();
   const [choice, setChoice] = useState<ReadingOptions>(defaults);
+  const [modeChoice, setModeChoice] = useState<ReaderMode>();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<ErrorCode>();
   const [confirmedProvider, setConfirmedProvider] = useState<ProviderId>();
   const initialized = useRef(false);
   const provider = page?.settings.provider;
   const confirmSensitive = provider !== undefined && confirmedProvider === provider;
+  const reader = page?.reader;
+  const readerMode = reader?.mode ?? 'dual';
+  const mode = modeChoice ?? readerMode;
 
   useEffect(() => {
     let disposed = false;
@@ -70,12 +78,12 @@ function Popup() {
     setPending(false);
   }
 
-  async function execute(command: 'start' | 'pause' | 'resume' | 'stop') {
+  async function execute(command: 'start' | ReaderControl) {
     if (tabId === undefined || provider === undefined || pending) return;
     setPending(true);
     setError(undefined);
     const result = await request<ReaderState | null>(command === 'start'
-      ? { type: 'start', tabId, provider, options: choice, confirmSensitive }
+      ? { type: 'start', tabId, provider, options: choice, mode, confirmSensitive }
       : { type: 'control', tabId, command });
     if (result.ok) {
       setPage((current) => current && ({ ...current, reader: result.value }));
@@ -96,8 +104,9 @@ function Popup() {
     setPending(false);
   }
 
-  const reader = page?.reader;
   const active = Boolean(reader && (reader.status !== 'error' || reader.total > 0));
+  const translationAction = !active ? modeLabels[mode].start : mode === readerMode ? '重新翻译' : modeLabels[mode].switch;
+  const retry = readerMode === 'replace' && (reader?.failed ?? 0) > 0;
   const access = page && selectedProviderAccess(page.settings);
   const configuredProviders = page ? providers.filter((id) => page.settings.providers[id].configured) : [];
   const setup = access && (!access.configured || !access.authorized);
@@ -125,6 +134,15 @@ function Popup() {
       </select>
     </label>}
     <LanguageFields value={choice} change={setChoice} locked={pending || Boolean(page?.error)} />
+    <label className="field mode-field">翻译模式
+      <select value={mode} disabled={pending || !page || Boolean(page.error)}
+        onChange={(event) => {
+          const next = event.currentTarget.value;
+          if (isReaderMode(next)) setModeChoice(next);
+        }}>
+        {Object.entries(modeLabels).map(([value, label]) => <option value={value} key={value}>{label.name}</option>)}
+      </select>
+    </label>
     {page?.sensitive && <label className="check sensitive">
       <input type="checkbox" checked={confirmSensitive} disabled={pending}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />
@@ -139,14 +157,16 @@ function Popup() {
     <div className="actions">
       {setup ? <button type="button" className="primary" onClick={() => void browser.runtime.openOptionsPage()}>配置翻译服务</button>
         : <button type="button" className="primary" disabled={blocked} onClick={() => void execute('start')}>
-          {active ? '重新翻译' : '开启双栏'}
+          {translationAction}
         </button>}
       {active && <>
-        {reader && reader.done + reader.failed < reader.total && <button type="button" disabled={pending}
-          onClick={() => void execute(reader.status === 'paused' || reader.error ? 'resume' : 'pause')}>
-          {reader.status === 'paused' || reader.error ? '继续' : '暂停'}
-        </button>}
-        <button type="button" disabled={pending} onClick={() => void execute('stop')}>关闭双栏</button>
+        {reader && (!retry || !reader.error) && (reader.status === 'paused' || reader.done + reader.failed < reader.total) &&
+          <button type="button" disabled={pending}
+            onClick={() => void execute(reader.status === 'paused' || reader.error ? 'resume' : 'pause')}>
+            {reader.status === 'paused' || reader.error ? '继续' : '暂停'}
+          </button>}
+        {retry && <button type="button" disabled={pending} onClick={() => void execute('retry')}>重试失败项</button>}
+        <button type="button" disabled={pending} onClick={() => void execute('stop')}>{modeLabels[readerMode].stop}</button>
       </>}
     </div>
     <div className="actions selection-actions">

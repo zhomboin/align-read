@@ -20,15 +20,19 @@ export default defineUnlistedScript(() => {
   async function open(session: Session) {
     stop();
     const command = generation;
-    const { startReader } = await import('../src/reader/session/reader');
+    const mode = session.mode ?? 'dual';
+    const start = mode === 'replace'
+      ? (await import('../src/reader/session/replacement-reader')).startReplacementReader
+      : (await import('../src/reader/session/reader')).startReader;
     if (command !== generation) return failure('stale');
-    const started = startReader(session, (reason) => {
+    const started = start(session, (reason) => {
       if (active?.id !== session.id) return;
       active = undefined;
-      lastState = reason ? { status: 'error', done: 0, total: 0, failed: 0, error: reason } : null;
+      lastState = reason ? { mode, status: 'error', done: 0, total: 0, failed: 0, error: reason } : null;
     });
     if (!started.ok) return failure(started.error);
-    active = started.value;
+    const reader = started.value;
+    active = { ...reader, state: () => ({ ...reader.state(), mode }) };
     return { ok: true, value: active.state() };
   }
 
@@ -49,6 +53,10 @@ export default defineUnlistedScript(() => {
         break;
       case 'reader:resume':
         active?.resume();
+        reply(active?.state() ?? null);
+        break;
+      case 'reader:retry':
+        active?.retry?.();
         reply(active?.state() ?? null);
         break;
       case 'reader:clear-cache':

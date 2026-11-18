@@ -15,24 +15,25 @@ const fittedStyles = new Set([
 ]);
 
 export function watchSourceChanges(
-  body: () => HTMLElement,
+  body: () => HTMLElement | null,
   scope: () => HTMLElement | undefined,
   signal: AbortSignal,
   checkPage: () => boolean,
   changed: () => void,
+  replacement?: { isSourceMutation: (record: MutationRecord) => boolean },
 ) {
   const prior = document.createElement('span').style;
   function meaningful(record: MutationRecord) {
     const element = record.target instanceof Element ? record.target : record.target.parentElement;
     if (!element || element.closest(extensionUi) || element.closest(ignored)) return false;
-    if (element !== document.documentElement && !body().contains(element)) return false;
+    if (element !== document.documentElement && !body()?.contains(element)) return false;
     const current = scope();
     if (current?.isConnected && !current.contains(element) && !element.contains(current)) {
       const candidates = record.type === 'attributes' ? [element] : Array.from(record.addedNodes);
       if (!candidates.some((node) => node instanceof Element &&
           (node.matches(mainSelector) || node.querySelector(mainSelector)))) return false;
     }
-    if (record.attributeName === 'style' && element instanceof HTMLElement) {
+    if (!replacement && record.attributeName === 'style' && element instanceof HTMLElement) {
       prior.cssText = record.oldValue ?? '';
       const properties = new Set([...Array.from(prior), ...Array.from(element.style)]);
       return [...properties].some((property) => !fittedStyles.has(property) &&
@@ -45,19 +46,23 @@ export function watchSourceChanges(
       node instanceof Text || node instanceof Element && !node.matches(extensionUi + ',' + ignored));
   }
   function process(records: MutationRecord[]) {
-    if (checkPage() && records.some(meaningful)) changed();
+    const sourceRecords = replacement ? records.filter(replacement.isSourceMutation) : records;
+    if (checkPage() && sourceRecords.some(meaningful)) changed();
   }
   const observer = new MutationObserver(process);
   observer.observe(document, {
     childList: true, characterData: true, attributes: true, attributeOldValue: true,
-    subtree: true, attributeFilter: attributes,
+    characterDataOldValue: Boolean(replacement), subtree: true,
+    attributeFilter: replacement ? [...attributes, 'inert', 'translate'] : attributes,
   });
   signal.addEventListener('abort', () => observer.disconnect(), { once: true });
+  const flush = () => process(observer.takeRecords());
+  const onNavigate = replacement ? flush : checkPage;
   const navigation = (window as Window & { navigation?: EventTarget }).navigation;
-  navigation?.addEventListener('currententrychange', checkPage, { signal });
-  window.addEventListener('popstate', checkPage, { signal });
-  window.addEventListener('hashchange', checkPage, { signal });
-  return () => process(observer.takeRecords());
+  navigation?.addEventListener('currententrychange', onNavigate, { signal });
+  window.addEventListener('popstate', onNavigate, { signal });
+  window.addEventListener('hashchange', onNavigate, { signal });
+  return flush;
 }
 
 export function routeText(article: Article) {

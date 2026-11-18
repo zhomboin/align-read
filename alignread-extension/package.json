@@ -15,6 +15,7 @@
     "test:selection": "node tests/release-check.cjs --selection",
     "test:layout": "node tests/release-check.cjs --layout",
     "test:spa": "node tests/release-check.cjs --spa",
+    "test:replace": "node tests/release-check.cjs --replace",
     "test:release": "node tests/release-check.cjs",
     "postinstall": "wxt prepare"
   },

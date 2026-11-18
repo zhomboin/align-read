@@ -1,0 +1,238 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const replacementFixturePath = '/replacement-fixture.html';
+const failedText = 'Failed fragment';
+const heldEdit = 'Pending altered phrase';
+const heldRoute = 'Pending route phrase';
+const heldStop = 'Pending stopped phrase';
+const reactiveOriginal = 'Reactive site phrase';
+const reactiveUpdate = 'Updated reactive site phrase';
+
+async function checkReplacementPopup({page, evaluate, until, request, saveYoudao, tabs, grants, session, youdaoOrigin, tabId}) {
+  const tab = {url: 'https://example.test/guide', documentId: 'replacement-popup'};
+  tabs.set(tabId, tab);
+  assert((await saveYoudao({appKey: 'test-app', appSecret: 'test-secret'})).ok);
+  grants.add(youdaoOrigin);
+  assert((await request({type: 'select-provider', provider: 'youdao'})).ok);
+  await page('Emulation.setDeviceMetricsOverride', {width: 440, height: 800, deviceScaleFactor: 1, mobile: false});
+  await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
+
+  const mode = 'document.querySelector(".mode-field select")';
+  const pick = (value) => evaluate(`fill(${mode}, ${JSON.stringify(value)}, 'change')`);
+  const button = (label) => `Array.from(document.querySelectorAll('button')).find(node => node.textContent === ${JSON.stringify(label)})`;
+  const shown = (label) => until(() => evaluate(`!!${button(label)} && !${button(label)}.disabled`));
+  const click = (label) => evaluate(`${button(label)}.click()`);
+
+  await shown('开启双栏');
+  assert.equal(await evaluate(`${mode}.value`), 'dual');
+  await click('开启选词翻译');
+  await shown('关闭选词翻译');
+  const selectionId = tab.selectionId;
+  await pick('replace');
+  await click('开启原位翻译');
+  await shown('恢复原文');
+  assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
+  assert.deepEqual(await request({type: 'start', tabId, provider: 'youdao', mode: 'invalid',
+    options: {source: 'en', target: 'zh-CN', range: 'main'}}, 'popup'), {ok: false, error: 'unavailable'});
+  assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
+  tab.readerState = {mode: 'replace', status: 'partial', total: 2, done: 1, failed: 1};
+  await page('Page.reload');
+  await shown('重试失败项');
+  assert.equal(await evaluate(`${mode}.value`), 'replace');
+  await click('重试失败项');
+  await until(() => tab.readerRetryMode === 'replace');
+  assert.equal(tab.selectionId, selectionId);
+  await pick('dual');
+  await click('切换为双栏');
+  await shown('关闭双栏');
+  assert.equal(session[`reader:${tabId}`].session.mode, 'dual');
+  assert.equal(tab.selectionId, selectionId);
+  await pick('replace');
+  await click('切换为原位翻译');
+  await shown('恢复原文');
+  await click('恢复原文');
+  await shown('开启原位翻译');
+  assert.equal(session[`reader:${tabId}`], undefined);
+  assert.equal(tab.selectionId, selectionId);
+  await request({type: 'reset'});
+  tabs.delete(tabId);
+  console.log('Built Popup retained the page mode, switched layouts, retried, and restored independently of selection.');
+}
+
+async function checkReplacementBrowser({page, evaluate, until, build}) {
+  const fixtureUrl = 'http://alignread.test' + replacementFixturePath;
+  const resize = (width) => page('Emulation.setDeviceMetricsOverride', {width, height: 850, deviceScaleFactor: 1, mobile: false});
+  await page('Page.navigate', {url: fixtureUrl});
+  await until(() => evaluate(`location.href === ${JSON.stringify(fixtureUrl)} && !!document.getElementById('mixed')`));
+  await resize(680);
+  await evaluate(`(${initReplacement})(${JSON.stringify(failedText)})`);
+  await evaluate(fs.readFileSync(path.join(build, 'reader.js'), 'utf8'));
+
+  const command = (type) => evaluate(`readerCommand({type:'reader:${type}'})`);
+  const start = (mode) => evaluate(`readerCommand({type:'reader:start',session:{id:'replacement-${mode}',mode:'${mode}',
+    source:'en',target:'zh-CN',range:'main',pageUrl:location.href,ratio:.5,highlight:true,syncScroll:true,cache:false}})`);
+  const content = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent`);
+  const state = (status, mode = 'replace') => until(async () => {
+    const current = await command('state');
+    if (current?.status === 'error') throw new Error(JSON.stringify(current));
+    return current?.mode === mode && current.status === status && current;
+  });
+  const messages = () => evaluate('replacementBatches.flatMap(({items}) => items.map(({text}) => text))');
+  const batchFor = (text) => until(() => evaluate(`replacementBatches.find(({items}) => items.some(item => item.text === ${JSON.stringify(text)}))`));
+  const hold = (text) => evaluate(`void replacementHeld.add(${JSON.stringify(text)})`);
+  const release = (batchId) => evaluate(`replacementRelease.get(${JSON.stringify(batchId)})()`);
+  const setParagraph = (id, value) => evaluate(`document.getElementById(${JSON.stringify(id)}).firstChild.data = ${JSON.stringify(value)}`);
+  const appendParagraph = (id, value) => evaluate(`document.querySelector('main').insertAdjacentHTML('beforeend',
+    ${JSON.stringify(`<p id="${id}">${value}</p>`)})`);
+  const assertOriginalLayout = async () => assert(await evaluate(`
+    getComputedStyle(document.body).position === 'static' && document.body.getBoundingClientRect().width > innerWidth * .9 &&
+    document.adoptedStyleSheets.length === 0 && !document.querySelector('[data-alignread-host]')`));
+
+  assert((await start('replace')).ok);
+  const partial = await state('partial');
+  assert.equal(partial.failed, 1);
+  await assertOriginalLayout();
+  assert.equal(await content('#mixed'), '  译 Read 译 the guide 译 with 译 care 译 and loadItem().  ');
+  assert.equal(await content('#partial'), 'Partial heading Failed fragment');
+  assert.equal(await content('#adjacent'), '译 First phrase 译 Second phrase');
+  assert(await evaluate('checkOriginalNodes()'));
+  await evaluate(`document.querySelector('#mixed a').click()`);
+  assert.equal(await evaluate('referenceClicks'), 1);
+  assert.equal(await evaluate(`document.querySelector('#mixed a').getAttribute('href')`), '#anchor');
+  assert.equal(await evaluate(`document.querySelector('input').value`), 'Input value');
+  const initial = await messages();
+  assert.deepEqual(initial.sort(), ['Read', 'the guide', 'with', 'care', 'and', 'First phrase', 'Second phrase',
+    'Original site paragraph', 'Site controlled phrase', 'Partial heading', failedText].sort());
+
+  await command('retry');
+  await state('ready');
+  assert.equal(await content('#partial'), '译 Partial heading 译 Failed fragment');
+  assert.equal((await messages()).filter(text => text === failedText).length, 2);
+  await evaluate('replacementBatches.length = 0');
+  await hold(heldEdit);
+  await setParagraph('anchor', heldEdit);
+  const oldEdit = await batchFor(heldEdit);
+  await setParagraph('anchor', 'Fresh site value');
+  await until(async () => (await content('#anchor')) === '译 Fresh site value');
+  await release(oldEdit.batchId);
+  await state('ready');
+  assert.equal(await content('#anchor'), '译 Fresh site value');
+  assert.deepEqual(await messages(), [heldEdit, 'Fresh site value']);
+
+  await evaluate(`(${initReactiveSiteParagraph})(${JSON.stringify(reactiveOriginal)})`);
+  await until(() => evaluate('siteWriteUndos >= 1'));
+  await state('ready');
+  assert.equal(await content('#site-reactive'), reactiveOriginal);
+  await evaluate(`updateReactiveSiteText(${JSON.stringify(reactiveUpdate)})`);
+  await until(() => evaluate('siteWriteUndos >= 2'));
+  await state('ready');
+  assert.equal(await content('#site-reactive'), reactiveUpdate);
+
+  await hold(heldStop);
+  await appendParagraph('stop-pending', heldStop);
+  const oldStop = await batchFor(heldStop);
+  await evaluate(`{
+    document.getElementById('site-owned').firstChild.data = 'Site latest value';
+    readerCommand({type:'reader:stop'});
+  }`);
+  await release(oldStop.batchId);
+  assert.equal(await command('state'), null);
+  assert.equal(await content('#anchor'), 'Fresh site value');
+  assert.equal(await content('#site-owned'), 'Site latest value');
+  assert.equal(await content('#stop-pending'), heldStop);
+  assert(await evaluate('checkOriginalNodes() && checkOriginalText()'));
+  assert.equal(await evaluate('siteWriteUndos'), 2);
+  assert.deepEqual((await messages()).filter(text => text === reactiveOriginal || text === reactiveUpdate),
+    [reactiveOriginal, reactiveUpdate]);
+  await evaluate(`document.getElementById('stop-pending').remove(); disposeReactiveSiteParagraph()`);
+
+  await resize(1280);
+  assert((await start('replace')).ok);
+  await state('ready');
+  assert((await start('dual')).ok);
+  await state('ready', 'dual');
+  assert(await evaluate(`checkOriginalText() && !!document.querySelector('[data-alignread-host]')`));
+  assert((await start('replace')).ok);
+  await state('ready');
+  await assertOriginalLayout();
+
+  await hold(heldRoute);
+  await appendParagraph('route-pending', heldRoute);
+  const oldRoute = await batchFor(heldRoute);
+  await evaluate(`history.pushState(null, '', '/replacement-next');
+    document.querySelector('main').insertAdjacentHTML('beforeend', '<p id="next-page">Next page phrase</p>')`);
+  await until(async () => (await content('#next-page')) === '译 Next page phrase');
+  await until(() => evaluate(`replacementCancelled.includes(${JSON.stringify(oldRoute.batchId)})`));
+  await release(oldRoute.batchId);
+  await state('ready');
+  assert.equal(await content('#route-pending'), heldRoute);
+  assert.equal(await content('#anchor'), 'Fresh site value');
+  assert(await evaluate('checkOriginalText()'));
+  await evaluate(`history.pushState(null, '', '/signin')`);
+  await until(async () => (await command('state'))?.error === 'sensitive-site');
+  assert.equal(await content('#next-page'), 'Next page phrase');
+  await assertOriginalLayout();
+  console.log('Built in-place reader preserved nodes and layout, restored originals, retried, and isolated late responses.');
+}
+
+function initReactiveSiteParagraph(original) {
+  const paragraph = document.createElement('p');
+  paragraph.id = 'site-reactive';
+  const node = document.createTextNode(original);
+  paragraph.append(node);
+  globalThis.siteWriteUndos = 0;
+  let source = original;
+  const observer = new MutationObserver(() => {
+    if (node.data === source) return;
+    siteWriteUndos++;
+    node.data = source;
+  });
+  observer.observe(node, {characterData: true});
+  document.querySelector('main').append(paragraph);
+  globalThis.updateReactiveSiteText = (text) => { source = text; node.data = text; };
+  globalThis.disposeReactiveSiteParagraph = () => { observer.disconnect(); paragraph.remove(); };
+}
+
+function initReplacement(failedText) {
+  const adjacent = document.querySelector('#adjacent');
+  adjacent.append(document.createTextNode('First phrase'), document.createTextNode(' Second phrase'));
+  const mixed = document.querySelector('#mixed');
+  const tracked = [mixed, ...mixed.children, adjacent];
+  const children = tracked.map(element => [...element.childNodes]);
+  const originals = tracked.map(element => element.textContent);
+  globalThis.checkOriginalNodes = () => tracked.every((element, index) => children[index].length === element.childNodes.length &&
+    children[index].every((node, position) => node === element.childNodes[position]));
+  globalThis.checkOriginalText = () => tracked.every((element, index) => element.textContent === originals[index]);
+  globalThis.referenceClicks = 0;
+  mixed.querySelector('a').addEventListener('click', event => {
+    event.preventDefault();
+    referenceClicks++;
+  });
+  globalThis.replacementBatches = [];
+  globalThis.replacementHeld = new Set();
+  globalThis.replacementRelease = new Map();
+  globalThis.replacementCancelled = [];
+  let fail = true;
+  chrome.runtime = {
+    id: 'alignread-test',
+    onMessage: {addListener(listener) {
+      globalThis.readerCommand = (message) => new Promise(resolve => listener(message, {id: 'alignread-test'}, resolve));
+    }},
+    async sendMessage(message) {
+      if (message.type === 'cancel') replacementCancelled.push(message.batchId);
+      if (message.type !== 'batch') return {ok: true};
+      replacementBatches.push(message);
+      const delayed = message.items.some(({text}) => replacementHeld.delete(text));
+      if (delayed) await new Promise(resolve => replacementRelease.set(message.batchId, resolve));
+      const items = message.items.flatMap(({id, text}) => {
+        if (fail && text === failedText) { fail = false; return []; }
+        return [{id, text: (delayed ? '过期 ' : '译 ') + text}];
+      });
+      return {ok: true, value: {id: message.batchId, items}};
+    },
+  };
+}
+
+module.exports = {checkReplacementBrowser, checkReplacementPopup, replacementFixturePath};
