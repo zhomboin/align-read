@@ -1,11 +1,13 @@
 # AlignRead（对阅）
 
-AlignRead 是 Chrome 桌面网页翻译扩展。可以双栏对照原文和译文，也可以在原网页直接用译文替换文字，或单独翻译选中的单词和短句。 [项目进度](docs/progress.md)
+AlignRead（对阅）已在 Chrome 网上应用店上线。商店版 0.1.6 支持双栏对照阅读和选词翻译。 [安装 AlignRead](https://chromewebstore.google.com/detail/alignread/eknjmgokcpffbikmkcnahgmbgcmdjihf?hl=zh-CN)
+
+下方使用说明对应仓库主分支，包含开发版的原位翻译。 [项目进度](docs/progress.md)
 
 - [产品需求](docs/AlignRead_PRD_v1.1.md)
 - [实现架构](docs/architecture.md)
 - [本地开发](docs/development.md)
-- [Chrome 网上应用店上架](docs/chrome-web-store.md)
+- [Chrome 网上应用店更新指南](docs/chrome-web-store.md)
 - [隐私政策](docs/privacy-policy.md)
 - [项目进度](docs/progress.md)与[版本记录](docs/version.md)
 
