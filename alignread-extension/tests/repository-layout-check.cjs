@@ -69,7 +69,12 @@ async function checkRepositoryLayout({evaluate, until, page, replaceFixture, sta
     'function visible_example() {\n    return "Semantic code example";\n}',
     'def build_sample():\n    return "Rendered code example"',
     'if ready:\n    log("Role code example")',
+    'if ready:\n    log("Preformatted rows")',
   ]);
+  assert.equal(await evaluate(`pane.querySelector('article a[href$="/usage"]').textContent`), 'Example command');
+  const hiddenTabs = await evaluate('/Collapsed tools tab|Inactive history tab/.test(pane.querySelector("article").textContent)');
+  assert.equal(hiddenTabs, false);
+  assert(!panes.payload.some(text => /Collapsed tools tab|Inactive history tab|Preformatted rows|Example command/.test(text)));
   assert.deepEqual(panes.codeLines, [
     ['1', 'if value:'],
     ['2', '    return "Code cell should stay unchanged"'],
@@ -121,6 +126,20 @@ async function checkRepositoryLayout({evaluate, until, page, replaceFixture, sta
   assert.deepEqual(await evaluate('readerPayloads'), []);
   assert.equal(await evaluate('pane.querySelector("article pre").innerText'), codeOnly);
   assert.equal(await evaluate('pane.querySelector(".toolbar .status").textContent'), '已显示原文');
+  await evaluate('pane.querySelector(".reader-mode-field input[value=replace]").click()');
+  await until(() => evaluate('pane.querySelector(".mode-switch-error")?.textContent === "未找到可翻译的可见文本。"'));
+  assert.equal((await readerState()).mode, 'dual');
+  assert.equal(await evaluate('pane.querySelector("article pre").innerText'), codeOnly);
+  assert.deepEqual(await evaluate('readerPayloads'), []);
+  await evaluate('readerCommand({type:"reader:stop"})');
+  await replaceFixture('<!doctype html><html><body><main><p><code>git status</code></p>' +
+    '<p><span role="code">git diff</span></p></main></body></html>');
+  await evaluate('readerPayloads.length = 0');
+  assert((await startLayout('inline-code-only', 'main')).ok);
+  await until(async () => (await readerState())?.status === 'ready');
+  const commands = await evaluate('[...pane.querySelectorAll("article p")].map(node => node.textContent)');
+  assert.deepEqual(commands, ['git status', 'git diff']);
+  assert.deepEqual(await evaluate('readerPayloads'), []);
   await evaluate('readerCommand({type:"reader:stop"})');
   console.log('Repository rows, links, code formatting, code-only previews, and clipped menu visibility passed.');
 }

@@ -18,7 +18,7 @@
     .commit { grid-column: 15 / span 7; }
     .commit, .rendered-code, .code-line { font-family: ui-monospace, monospace; }
     .updated { grid-column: 22 / span 3; }
-    .tools-panel[data-state="closed"] { max-block-size: 0; overflow: hidden; }
+    .tools-panel[data-state="closed"], .collapsed-tab { max-block-size: 0; overflow: hidden; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
       overflow: hidden; white-space: nowrap; clip-path: inset(50%); border: 0;
@@ -57,11 +57,21 @@
         </ul>
       </div>
       <h2>Usage example</h2>
+      <ul style="display:flex; gap:1em">
+        <li><code><a href="https://example.com/repository/usage">Example command</a></code></li>
+        <li><a href="https://example.com/repository/notes">Usage notes</a></li>
+      </ul>
+      <div role="tablist">
+        <a role="tab" href="#files">Files</a>
+        <div><div class="collapsed-tab"><a role="tab" href="#tools">Collapsed tools tab</a></div></div>
+        <div><div inert><a role="tab" href="#history">Inactive history tab</a></div></div>
+      </div>
       <pre><code>function visible_example() {<br>    return "Semantic code example";
 }</code></pre>
       <div class="rendered-code"><span>def</span> build_sample():
     return "Rendered code example"</div>
       <div role="code"><div><span>if</span> ready:</div><div>    log("Role code example")</div></div>
+      <pre><code><span style="display:block">if ready:</span><span style="display:block">    log("Preformatted rows")</span></code></pre>
       <p>Pass <code>Inline code example</code> as the first argument.</p>
       <table>
         <tbody>

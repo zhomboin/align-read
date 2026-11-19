@@ -6,7 +6,7 @@ import {
 } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
 import { connectAlignment } from '../alignment/alignment';
-import { extractArticle, type Article } from '../extraction/document';
+import { extractArticle, type Article, type Mark } from '../extraction/document';
 import { createSplit, MIN_WIDTH, viewportWidth } from '../layout/split';
 import { focusReaderMode } from '../ui/reader-mode-controls';
 import { ReaderPanel } from '../ui/reader-panel';
@@ -25,6 +25,7 @@ export type ActiveReader = {
 
 const refreshDelay = 80;
 const layoutRecoveryTime = 400;
+const codeMarks = new Set<Mark>(['code', 'kbd', 'samp']);
 
 let dismissNotice: (() => void) | undefined;
 
@@ -36,11 +37,13 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   if (session.pageUrl && (!initialPage || readReaderPage(session.pageUrl)?.key !== initialPage.key)) return failure('stale');
 
   const lifecycle = new AbortController();
-  const modeSwitch = createModeSwitch(session, lifecycle.signal, render);
   let ratio = session.ratio;
   let sync = session.syncScroll;
   let hover = session.highlight;
   let article: Article | undefined;
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, render, () => {
+    if (article && !article.blocks.some(({ pieces }) => pieces.some((piece) => piece.translate))) return 'no-text';
+  });
   const identity = createArticleIdentity();
   const translation = createTranslation(session, lifecycle.signal, render);
   let alignment: ReturnType<typeof connectAlignment> | undefined;
@@ -247,8 +250,11 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       if (!validSources(result)) { sourceChanged(); return; }
       const source = routeText(result);
       if (waitingForRoute && !source.size) return;
-      const hasContent = result.blocks.some((block) =>
-        block.tag === 'pre' || block.pieces.some((piece) => piece.translate && piece.text.trim()));
+      const hasContent = result.blocks.some(({ tag, pieces }) => {
+        if (tag === 'pre') return true;
+        return pieces.some(({ translate, text, marks }) =>
+          translate || (text.trim() && marks.some((mark) => codeMarks.has(mark))));
+      });
       if (!hasContent) {
         if (initialLayout && !waitingForRoute) { close('no-text'); return; }
         article = undefined;

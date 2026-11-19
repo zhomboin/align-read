@@ -144,7 +144,8 @@ export async function extractArticle(
       runs.push(lineBreak);
       return;
     }
-    const mark: Mark | undefined = inlineTags[node.tagName as keyof typeof inlineTags];
+    const mark: Mark | undefined = inlineTags[node.tagName as keyof typeof inlineTags] ??
+      (node.matches('[role~=code]') ? 'code' : undefined);
     const newMarks = (mark ? [mark] : inlineEmphasis(node)).filter((item) => !marks.includes(item));
     const nextMarks = newMarks.length ? [...marks, ...newMarks] : marks;
     const preserveCode = locked || node.matches(codeTextSelector) || isCodeBlock(node, style);
@@ -170,7 +171,7 @@ export async function extractArticle(
   async function copyCode(element: HTMLElement) {
     if (replacement) return undefined;
     const runs: Run[] = [];
-    await inline(element, runs, [], undefined, true, element.tagName !== 'PRE');
+    await inline(element, runs, [], undefined, true, true);
     return block(element, 'pre', runs);
   }
 
@@ -184,7 +185,8 @@ export async function extractArticle(
       const control = explicit
         ? child.matches('[role=tab]') ? child : child.querySelector<HTMLElement>('[role=tab]')
         : listLink(child);
-      if (!control || !readableStyle(control) || explicit && control.closest('[role=tablist]') !== element) {
+      if (!control || !readableStyle(control) || !visibleContext(control, true) ||
+          explicit && control.closest('[role=tablist]') !== element) {
         const visibleRuns: Run[] = [];
         await inline(child, visibleRuns);
         if (visibleRuns.some((run) => run !== lineBreak && run.text.trim())) return undefined;
@@ -477,7 +479,7 @@ function displayedChildren(element: HTMLElement): Iterable<Node> {
 }
 
 function visibleContext(element: HTMLElement, excludeCode = false) {
-  if (element.closest(excluded)) return false;
+  if (element.closest(excluded) || (excludeCode && element.closest(codeTextSelector))) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     const style = getComputedStyle(ancestor);
     if (!visible(ancestor, style) || excludeCode && isCodeBlock(ancestor, style)) return false;

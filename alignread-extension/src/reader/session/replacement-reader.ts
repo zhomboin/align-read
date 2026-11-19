@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { failure, success, type ErrorCode, type ReaderRequest, type Result, type Session } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
 import { canReplaceText, extractArticle, type Article } from '../extraction/document';
+import { MIN_WIDTH, viewportWidth } from '../layout/split';
 import { createReplacementToolbar } from '../ui/replacement-toolbar';
 import { createArticleIdentity } from './article-identity';
 import { createModeSwitch } from './mode-switch';
@@ -20,7 +21,9 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
 
   const lifecycle = new AbortController();
   const toolbar = createReplacementToolbar();
-  const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar);
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar, () => {
+    if (viewportWidth() < MIN_WIDTH) return 'narrow';
+  });
   const identity = createArticleIdentity();
   const replacement = trackReplacementText();
   const translation = createTranslation(session, lifecycle.signal, applyTranslations);
