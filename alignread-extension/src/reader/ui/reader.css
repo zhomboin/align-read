@@ -148,3 +148,6 @@ article [data-reading-code-cell] { block-size: 1.65em; padding-block: 0; }
 [data-reader-block][data-active] { outline: 2px solid #9e7928; outline-offset: 2px; background-color: #f8edca; color: #17211c; }
 [data-reader-block] { cursor: pointer; }
 .retry { padding: 0 4px; font-size: 10px; line-height: 1.5; margin-inline-start: .4em; vertical-align: middle; }
+
+.reading-math { max-width: 100%; overflow-wrap: anywhere; }
+.reading-math:has(> math[display="block"]) { display: block; overflow-x: auto; }

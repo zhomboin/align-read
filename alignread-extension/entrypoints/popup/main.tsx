@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
+import { pdfAddress } from '../../src/shared/pdf-source';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
   TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
@@ -24,6 +25,7 @@ const providers = Object.keys(TRANSLATION_PROVIDERS).filter(isProviderId);
 
 function Popup() {
   const [tabId, setTabId] = useState<number>();
+  const [pdfTab, setPdfTab] = useState(false);
   const [page, setPage] = useState<PageState>();
   const [choice, setChoice] = useState<ReadingOptions>(defaults);
   const [modeChoice, setModeChoice] = useState<ReaderMode>();
@@ -43,6 +45,7 @@ function Popup() {
       if (disposed) return;
       if (tab?.id === undefined) { setError('unsupported-page'); return; }
       setTabId(tab.id);
+      setPdfTab(Boolean(pdfAddress(tab.url)));
     }, () => { if (!disposed) setError('unavailable'); });
     return () => { disposed = true; };
   }, []);
@@ -120,8 +123,11 @@ function Popup() {
     <header>
       <div className="brand"><img src="/icons/32.png" alt="" width="28" height="28" /><h1>AlignRead</h1></div>
       <button type="button" onClick={() => void browser.runtime.openOptionsPage()}>设置</button>
+      <button type="button" onClick={() => void browser.tabs.create({
+        url: browser.runtime.getURL('/pdf.html') + (pdfTab ? '#' + tabId : ''),
+      })}>{pdfTab ? '打开当前 PDF' : '打开 PDF'}</button>
     </header>
-    {page && <label className="field provider-field">翻译服务
+    {(!pdfTab || (page && !page.error)) && <>{page && <label className="field provider-field">翻译服务
       <select value={access?.configured ? provider : ''} disabled={pending || configuredProviders.length === 0}
         onChange={(event) => void switchProvider(event.target.value)}>
         {!access?.configured && <option value="" disabled>
@@ -175,6 +181,7 @@ function Popup() {
     {page && !page.error && !setup && !page.selectionEnabled && <p className="selection-consent" id="selection-consent">
       点击「译」后，选中文字会发送给当前翻译服务。
     </p>}
+    </>}
   </main>;
 }
 

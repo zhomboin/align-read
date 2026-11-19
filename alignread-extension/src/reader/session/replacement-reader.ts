@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { failure, success, type ErrorCode, type ReaderRequest, type Result, type Session } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
 import { canReplaceText, extractArticle, type Article } from '../extraction/document';
+import { displayComment } from '../extraction/code-comments';
 import { MIN_WIDTH, viewportWidth } from '../layout/split';
 import { createReplacementToolbar } from '../ui/replacement-toolbar';
 import { createArticleIdentity } from './article-identity';
@@ -132,7 +133,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
         if (replacement.siteControls(node)) return true;
         const previous = outgoing.get(node);
         return Boolean(previous && previous.key !== viewKey && previous.text === replacement.readText(node));
-      }, replacement);
+      }, replacement, session.replaceComments);
       flushChanges();
       if (closing || current !== revision || controller.signal.aborted) return;
 
@@ -180,13 +181,17 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
         !node.isConnected || replacement.readText(node) !== original)) continue;
       let applied = true;
       for (const [node, fragments] of block.replacements) {
-        if (!canReplaceText(node)) {
+        const isComment = fragments.some((fragment) => typeof fragment !== 'string' && fragment.comment);
+        if (!canReplaceText(node, isComment)) {
           replacement.restore(node);
           applied = false;
           continue;
         }
-        const value = fragments.map((fragment) => typeof fragment === 'string'
-          ? fragment : translation.show(fragment.id, fragment.text)).join('');
+        const value = fragments.map((fragment) => {
+          if (typeof fragment === 'string') return fragment;
+          const translated = translation.show(fragment.id, fragment.text);
+          return fragment.comment ? displayComment(fragment.text, translated) : translated;
+        }).join('');
         replacement.apply(node, block.snapshots.get(node)!, value);
       }
       if (applied) appliedBlocks.add(block.id);

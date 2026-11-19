@@ -3,11 +3,9 @@ import {
   getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, providerConsent,
   providerOrigin, publicSettings, removeUnusedProviderPermissions, sameCredentials, updateSettings, type Settings,
 } from '../src/background/settings/settings';
-import { ai } from '../src/background/translation/ai';
+import { installPdfTranslation } from '../src/background/pdf-port';
+import { translateWithProvider } from '../src/background/translation/dispatch';
 import { aiStrategy } from '../src/background/translation/ai-strategies';
-import { google } from '../src/background/translation/google';
-import type { TranslationBatch } from '../src/background/translation/provider';
-import { youdao } from '../src/background/translation/youdao';
 import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
 import { readReaderPage } from '../src/shared/reader-page';
 import {
@@ -29,6 +27,7 @@ let slot = 0;
 const grantKey = (tabId: number, kind: SessionKind) => kind + ':' + tabId;
 
 export default defineBackground(() => {
+  installPdfTranslation(validItems);
   browser.runtime.onMessage.addListener((message: unknown, sender, reply) => {
     if (!isRecord(message) || sender.id !== browser.runtime.id) return;
     let response: Promise<unknown> | undefined;
@@ -37,6 +36,8 @@ export default defineBackground(() => {
       // Switching stops sessions via the same tab queue used by start and stop.
       response = command.type === 'page' || command.type === 'switch-provider'
         ? popup(command) : onTab(command.tabId, () => popup(command));
+    } else if (sender.url?.split('#')[0] === browser.runtime.getURL('/pdf.html') && message.type === 'settings') {
+      response = options({ type: 'settings' });
     } else if (sender.url === browser.runtime.getURL('/options.html')) {
       response = options(message as unknown as OptionsMessage);
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
@@ -358,6 +359,7 @@ async function popup(message: PopupMessage) {
   const session: Session = {
     source: message.options.source, target: message.options.target, range: message.options.range,
     id: crypto.randomUUID(), ratio: view.ratio,
+    dualComments: view.dualComments, replaceComments: view.replaceComments,
     highlight: view.highlight, syncScroll: view.syncScroll, cache: view.cache && !sensitive,
     ...(message.type === 'start' && { pageUrl: tab.url, mode: message.mode ?? 'dual' }),
   };
@@ -545,17 +547,6 @@ async function translate(tabId: number, kind: SessionKind, grant: Grant, message
     if (pageFailure) return pageFailure;
   }
   return signal.aborted ? failure('stale') : result;
-}
-
-function translateWithProvider(provider: ProviderId, settings: Settings, request: TranslationBatch, signal: AbortSignal) {
-  switch (provider) {
-    case 'google': return settings.key ? google.translateSegments(request, settings.key, signal) : failure('not-configured');
-    case 'youdao': return settings.youdao ? youdao.translateSegments(request, settings.youdao, signal) : failure('not-configured');
-    default: {
-      const service = settings.aiServices[provider];
-      return service ? ai.translateSegments(request, { ...service, provider }, signal) : failure('not-configured');
-    }
-  }
 }
 
 function validItems(items: unknown): items is TranslationItem[] {

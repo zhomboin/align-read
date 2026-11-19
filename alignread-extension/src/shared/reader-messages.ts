@@ -13,6 +13,8 @@ export type ReadingRange = 'visible' | 'main';
 export type ReaderMode = 'dual' | 'replace';
 export type ReadingOptions = { source: SourceLanguage; target: Language; range: ReadingRange };
 export type Preferences = ReadingOptions & {
+  dualComments: boolean;
+  replaceComments: boolean;
   ratio: number;
   syncScroll: boolean;
   highlight: boolean;
@@ -44,6 +46,7 @@ export type YoudaoCredentials = { appKey: string; appSecret: string };
 export const MAX_YOUDAO_CREDENTIAL_LENGTH = 250;
 
 export const defaults: Preferences = {
+  dualComments: false, replaceComments: false,
   source: 'auto', target: 'zh-CN', range: 'visible', ratio: 0.5,
   syncScroll: true, highlight: true, cache: true, disabledSites: [], authorized: false,
 };
@@ -85,6 +88,8 @@ export const success = <T>(value: T): Result<T> => ({ ok: true, value });
 export const failure = (error: ErrorCode): Failure => ({ ok: false, error });
 
 export type Session = ReadingOptions & {
+  dualComments?: boolean;
+  replaceComments?: boolean;
   id: string;
   mode?: ReaderMode;
   pageUrl?: string;

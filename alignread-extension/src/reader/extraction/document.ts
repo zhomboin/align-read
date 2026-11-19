@@ -1,4 +1,6 @@
 import type { ReadingRange } from '../../shared/reader-messages';
+import { commentParts, markComments, type CommentRange } from './code-comments';
+import { formulaSelector, readFormula, texExpression, type Formula } from './formulas';
 import type { SidebarLayout } from '../layout/sidebar';
 import { inlineEmphasis, readInlineAppearance, readSurface, textWhiteSpace, type Surface } from './appearance';
 
@@ -9,6 +11,7 @@ const inlineTags = {
 export type Mark = (typeof inlineTags)[keyof typeof inlineTags];
 export type Piece = {
   id: string; text: string; translate: boolean; marks: Mark[]; href?: string; lineBreak?: true;
+  formula?: Formula; comment?: true;
 };
 export type ReplacementFragment = string | Piece;
 export type Block = {
@@ -47,7 +50,7 @@ const excluded = [
 const codeTextSelector = 'pre,code,kbd,samp,[role~=code]';
 const replacementExcluded = [
   excluded, 'button', '[role=searchbox]', '[role=spinbutton]', '[role=slider]',
-  codeTextSelector,
+  formulaSelector,
   '[translate=no i]', '.notranslate', '[data-alignread-selection]',
 ].join(',');
 const structural = new Set(['UL', 'OL', 'LI', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT',
@@ -64,23 +67,26 @@ const protectedText = /(https?:\/\/[^\s<>]+|\bwww\.[^\s<>]+|\b[vV]?\d+(?:\.\d+)+
 const word = /\p{L}/u;
 const mainExcluded = 'nav,aside,footer,[role=navigation],[role=complementary],[role=banner],[role=contentinfo]';
 
-type TextRun = { node: Text; text: string; translate: boolean; marks: Mark[]; href?: string };
+type TextRun = { node: Text; text: string; translate: boolean; marks: Mark[]; href?: string; comments?: CommentRange[] };
+type FormulaRun = { element: Element; text: string; formula: Formula };
 const lineBreak = Symbol('lineBreak');
-type Run = TextRun | typeof lineBreak;
+type Run = TextRun | FormulaRun | typeof lineBreak;
 type Column = { start: number; end: number; bounds: DOMRect; element: HTMLElement; style: CSSStyleDeclaration };
 type NavigationLayout = { style: 'links' | 'tabs'; direction: 'ltr' | 'rtl'; vertical: boolean };
 type NavigationItem = { control: HTMLElement; bounds: DOMRect; current: boolean };
 
-export function canReplaceText(node: Text) {
+export function canReplaceText(node: Text, isComment = false) {
   const parent = node.parentElement;
   return node.getRootNode() === document && parent instanceof HTMLElement &&
     !(parent instanceof HTMLDetailsElement && !parent.open) &&
-    replacementAllowed(parent) && visibleContext(parent, true);
+    replacementAllowed(parent) && visibleContext(parent, !isComment);
 }
 
 export async function extractArticle(
   range: ReadingRange, signal: AbortSignal, sidebar?: SidebarLayout, skipText?: (node: Text) => boolean,
   replacement?: { readText(node: Text): string },
+  translateComments = false,
+  detectComments = translateComments,
 ): Promise<Article> {
   const mainOnly = range === 'main';
   const scope = (mainOnly ? mainContent(replacement ? replacementAllowed : undefined) : undefined) ?? document.body;
@@ -104,19 +110,30 @@ export async function extractArticle(
     return replacement?.readText(node) ?? node.data;
   }
 
+  function collectFormula(node: Node, runs: Run[]) {
+    if (!(node instanceof Element) || !node.matches(formulaSelector)) return false;
+    const style = getComputedStyle(node);
+    if (!replacement && !node.closest(excluded) && visible(node as HTMLElement, style)) {
+      const formula = readFormula(node);
+      runs.push({ element: node, text: formula.text, formula });
+    }
+    return true;
+  }
+
   function block(source: HTMLElement, tag: Block['tag'], runs: Run[]) {
-    if (skipText) runs = runs.filter((run) => run === lineBreak || !skipText(run.node));
-    const textRuns = runs.filter((run) => run !== lineBreak);
-    if (!textRuns.some((run) => run.text.trim())) return undefined;
+    if (skipText) runs = runs.filter((run) => run === lineBreak || 'element' in run || !skipText(run.node));
+    const content = runs.filter((run) => run !== lineBreak);
+    if (!content.some((run) => run.text.trim())) return undefined;
+    const textRuns = content.filter((run): run is TextRun => 'node' in run);
     const id = 'b' + (blocks.length + 1);
     const whiteSpace = tag === 'pre' ? undefined : textWhiteSpace(getComputedStyle(source));
     const mapped = replacement ? replacementPieces(id, textRuns) : undefined;
-    const pieces = mapped?.pieces ?? readingPieces(id, tag, whiteSpace, runs);
+    const pieces = mapped?.pieces ?? readingPieces(id, tag, whiteSpace, runs, translateComments);
     const range = new Range();
-    range.setStart(textRuns[0]!.node, 0);
-    const last = textRuns.at(-1)!.node;
-    range.setEnd(last, last.length);
-    const ranges = textRuns.map(({ node }) => {
+    const anchors = content.map((run) => 'element' in run ? run.element : run.node);
+    range.setStartBefore(anchors[0]!);
+    range.setEndAfter(anchors.at(-1)!);
+    const ranges = anchors.map((node) => {
       const highlight = new Range();
       highlight.selectNodeContents(node);
       return highlight;
@@ -137,7 +154,7 @@ export async function extractArticle(
       if (text) runs.push({ node, text, translate: !locked, marks, href });
       return;
     }
-    if (!(node instanceof HTMLElement)) return;
+    if (collectFormula(node, runs) || !(node instanceof HTMLElement)) return;
     const style = readableStyle(node);
     if (!style) return;
     if (node.tagName === 'BR') {
@@ -149,7 +166,14 @@ export async function extractArticle(
     const newMarks = (mark ? [mark] : inlineEmphasis(node)).filter((item) => !marks.includes(item));
     const nextMarks = newMarks.length ? [...marks, ...newMarks] : marks;
     const preserveCode = locked || node.matches(codeTextSelector) || isCodeBlock(node, style);
-    if (replacement && preserveCode) return;
+    if (replacement && preserveCode && !translateComments) return;
+    if (preserveCode && !locked && detectComments) {
+      const code: Run[] = [];
+      await inline(node, code, marks, href, true, codeLines);
+      annotateComments(node, code);
+      runs.push(...code);
+      return;
+    }
     const link = node instanceof HTMLAnchorElement ? safeLink(node.getAttribute('href')) : href;
     const first = runs.length;
     let previousWasBlock = false;
@@ -169,10 +193,16 @@ export async function extractArticle(
   }
 
   async function copyCode(element: HTMLElement) {
-    if (replacement) return undefined;
+    if (replacement && !translateComments) return undefined;
     const runs: Run[] = [];
     await inline(element, runs, [], undefined, true, true);
+    if (detectComments) annotateComments(element, runs);
     return block(element, 'pre', runs);
+  }
+
+  function annotateComments(element: HTMLElement, runs: Run[]) {
+    const code = runs.filter((run): run is TextRun | typeof lineBreak => run === lineBreak || 'node' in run);
+    markComments(element, code);
   }
 
   async function readNavigation(element: HTMLElement): Promise<ReadingNode | undefined> {
@@ -228,6 +258,7 @@ export async function extractArticle(
     const items: { element: HTMLElement; style: CSSStyleDeclaration }[] = [];
     let atomic = false;
     for (const child of parent.childNodes) {
+      if (child instanceof Element && child.matches(formulaSelector)) return undefined;
       if (child instanceof Text && child.data.trim()) return undefined;
       if (!(child instanceof HTMLElement)) continue;
       await pulse();
@@ -287,6 +318,7 @@ export async function extractArticle(
     };
     for (const child of displayedChildren(parent)) {
       await pulse();
+      if (collectFormula(child, runs)) continue;
       if (child instanceof Text) {
         const text = sourceText(child);
         if (text) runs.push({ node: child, text, translate: true, marks: [] });
@@ -317,7 +349,6 @@ export async function extractArticle(
         result.push(image || { tag: 'hr' });
       } else if (isCodeBlock(child, style)) {
         flush();
-        if (replacement) continue;
         const entry = await copyCode(child);
         if (structural.has(tag)) {
           const branch = structure(child, entry ? [entry] : [], style);
@@ -375,7 +406,7 @@ export async function extractArticle(
   }
 
   let nodes: ReadingNode[] = [];
-  if (visibleContext(scope, Boolean(replacement)) && (!replacement || replacementAllowed(scope))) {
+  if (visibleContext(scope, Boolean(replacement) && !translateComments) && (!replacement || replacementAllowed(scope))) {
     if (scope.matches(codeTextSelector) || isCodeBlock(scope, getComputedStyle(scope))) {
       const entry = await copyCode(scope);
       if (entry) nodes.push(entry);
@@ -386,7 +417,7 @@ export async function extractArticle(
   return { nodes, blocks, scope };
 }
 
-function readingPieces(id: string, tag: Block['tag'], whiteSpace: Block['whiteSpace'], runs: Run[]) {
+function readingPieces(id: string, tag: Block['tag'], whiteSpace: Block['whiteSpace'], runs: Run[], translateComments: boolean) {
   const pieces: Piece[] = [];
   const appendBreak = () => {
     pieces.push({ id: id + 'p' + pieces.length, text: '', translate: false, marks: [], lineBreak: true });
@@ -396,30 +427,46 @@ function readingPieces(id: string, tag: Block['tag'], whiteSpace: Block['whiteSp
       appendBreak();
       continue;
     }
+    if ('formula' in run) {
+      pieces.push({ id: id + 'p' + pieces.length, text: run.text, translate: false, marks: [], formula: run.formula });
+      continue;
+    }
+    if (run.comments) {
+      for (const part of commentParts(run.text, run.comments)) {
+        pieces.push({ id: id + 'p' + pieces.length, text: part.text, translate: translateComments && part.comment,
+          comment: part.comment || undefined, marks: run.marks, href: run.href });
+      }
+      continue;
+    }
     // Keep actual line boundaries local so a provider cannot collapse them.
-    const segments = tag !== 'pre' && whiteSpace
-      ? run.text.split(/(\r\n|\r|\n)/) : [run.text];
-    for (const [segmentIndex, segment] of segments.entries()) {
-      if (segmentIndex % 2) {
-        appendBreak();
+    for (const [mathIndex, part] of (run.translate ? run.text.split(texExpression) : [run.text]).entries()) {
+      if (mathIndex % 2) {
+        pieces.push({ id: id + 'p' + pieces.length, text: part, translate: false, marks: [], formula: { text: part } });
         continue;
       }
-      for (const [index, text] of (run.translate ? segment.split(protectedText) : [segment]).entries()) {
-        if (!text) continue;
-        const translate = run.translate && index % 2 === 0 && word.test(text);
-        const previous = pieces.at(-1);
-        if (previous && !previous.lineBreak && previous.translate === translate && previous.href === run.href &&
-            previous.marks.join() === run.marks.join()) {
-          previous.text += text;
-        } else {
-          pieces.push({ id: id + 'p' + pieces.length, text, translate, marks: run.marks, href: run.href });
+      const segments = tag !== 'pre' && whiteSpace ? part.split(/(\r\n|\r|\n)/) : [part];
+      for (const [segmentIndex, segment] of segments.entries()) {
+        if (segmentIndex % 2) {
+          appendBreak();
+          continue;
+        }
+        for (const [index, text] of (run.translate ? segment.split(protectedText) : [segment]).entries()) {
+          if (!text) continue;
+          const translate = run.translate && index % 2 === 0 && word.test(text);
+          const previous = pieces.at(-1);
+          if (previous && !previous.lineBreak && !previous.formula && !previous.comment && previous.translate === translate && previous.href === run.href &&
+              previous.marks.join() === run.marks.join()) {
+            previous.text += text;
+          } else {
+            pieces.push({ id: id + 'p' + pieces.length, text, translate, marks: run.marks, href: run.href });
+          }
         }
       }
     }
   }
 
   return tag !== 'pre' && whiteSpace !== 'pre-wrap'
-    ? pieces.map((piece) => ({ ...piece, text: piece.text.replace(/\s+/g, ' ') }))
+    ? pieces.map((piece) => piece.formula || piece.comment || piece.marks.includes('code') ? piece : { ...piece, text: piece.text.replace(/\s+/g, ' ') })
     : pieces;
 }
 
@@ -427,30 +474,43 @@ function replacementPieces(id: string, runs: TextRun[]) {
   const pieces: Piece[] = [];
   const replacements = new Map<Text, ReplacementFragment[]>();
   for (const run of runs) {
+    if (run.comments) {
+      const fragments = commentParts(run.text, run.comments).map((part) => {
+        if (!part.comment) return part.text;
+        const piece: Piece = { id: id + 'p' + pieces.length, text: part.text, translate: true, marks: run.marks, comment: true };
+        pieces.push(piece);
+        return piece;
+      });
+      replacements.set(run.node, fragments);
+      continue;
+    }
     if (!run.translate) continue;
     const fragments: ReplacementFragment[] = [];
     const previousLength = pieces.length;
-    for (const [lineIndex, line] of run.text.split(/(\r\n|\r|\n)/).entries()) {
-      if (lineIndex % 2) {
-        fragments.push(line);
-        continue;
-      }
-      for (const [index, text] of line.split(protectedText).entries()) {
-        if (!text) continue;
-        if (index % 2 || !word.test(text)) {
-          fragments.push(text);
+    for (const [mathIndex, part] of run.text.split(texExpression).entries()) {
+      if (mathIndex % 2) { fragments.push(part); continue; }
+      for (const [lineIndex, line] of part.split(/(\r\n|\r|\n)/).entries()) {
+        if (lineIndex % 2) {
+          fragments.push(line);
           continue;
         }
-        const source = text.trim();
-        const start = text.indexOf(source);
-        const end = start + source.length;
-        if (start > 0) fragments.push(text.slice(0, start));
-        const piece: Piece = {
-          id: id + 'p' + pieces.length, text: source, translate: true, marks: run.marks, href: run.href,
-        };
-        pieces.push(piece);
-        fragments.push(piece);
-        if (end < text.length) fragments.push(text.slice(end));
+        for (const [index, text] of line.split(protectedText).entries()) {
+          if (!text) continue;
+          if (index % 2 || !word.test(text)) {
+            fragments.push(text);
+            continue;
+          }
+          const source = text.trim();
+          const start = text.indexOf(source);
+          const end = start + source.length;
+          if (start > 0) fragments.push(text.slice(0, start));
+          const piece: Piece = {
+            id: id + 'p' + pieces.length, text: source, translate: true, marks: run.marks, href: run.href,
+          };
+          pieces.push(piece);
+          fragments.push(piece);
+          if (end < text.length) fragments.push(text.slice(end));
+        }
       }
     }
     if (pieces.length !== previousLength) replacements.set(run.node, fragments);
@@ -479,7 +539,7 @@ function displayedChildren(element: HTMLElement): Iterable<Node> {
 }
 
 function visibleContext(element: HTMLElement, excludeCode = false) {
-  if (element.closest(excluded) || (excludeCode && element.closest(codeTextSelector))) return false;
+  if (element.closest(excluded) || element.closest(formulaSelector) || (excludeCode && element.closest(codeTextSelector))) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     const style = getComputedStyle(ancestor);
     if (!visible(ancestor, style) || excludeCode && isCodeBlock(ancestor, style)) return false;

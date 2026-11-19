@@ -2,6 +2,7 @@ node_modules/
 .output/
 .wxt/
 coverage/
+.local/
 debug.log
 .env
 .env.*

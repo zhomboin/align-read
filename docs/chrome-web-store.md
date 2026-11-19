@@ -8,7 +8,7 @@ AlignRead 已通过审核并上线。发布新版本时，在现有条目提交�
 
 宣传素材可分别上传到「小型宣传图块」和「顶部宣传图块」。 [440×280 小型宣传图 PNG](store/promo-small.png) · [1400×560 顶部宣传图 JPEG](store/promo-marquee.jpg)
 
-商品详情的「屏幕截图」可以按下列顺序上传。五张均为 1280×800 的 24 位 PNG，使用扩展生产构建的截图。阅读画面使用本地演示文章和预设译文。上传前核对截图与送审包的功能和界面一致。 [商店图片要求](https://developer.chrome.com/docs/webstore/images)
+商品详情的「屏幕截图」可以按下列顺序上传。五张均为 1280×800 的 24 位 PNG，使用扩展生产构建的截图。阅读画面使用本地演示文章和预设译文。提交含 PDF 阅读器的版本前，使用候选包补拍 PDF 原页与译文对照，并核对截图、注释开关与隐私政策。 [商店图片要求](https://developer.chrome.com/docs/webstore/images)
 
 1. [双栏对照阅读](store/dual-pane.png)
 2. [点击译文定位并高亮原文](store/paragraph-highlight.png)

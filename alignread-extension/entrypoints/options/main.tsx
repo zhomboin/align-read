@@ -19,14 +19,14 @@ const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', s
 const categories = ['translation', 'reading', 'sites'] as const;
 type Category = typeof categories[number];
 type PreferenceCategory = Exclude<Category, 'translation'>;
-type ReadingPreferences = ReadingOptions & Pick<PublicSettings, 'ratio' | 'syncScroll' | 'highlight'>;
+type ReadingPreferences = ReadingOptions & Pick<PublicSettings, 'ratio' | 'syncScroll' | 'highlight' | 'dualComments' | 'replaceComments'>;
 
 function currentCategory(): Category {
   return categories.find((category) => location.hash === `#${category}`) ?? 'translation';
 }
 
-function readingPreferences({ source, target, range, ratio, syncScroll, highlight }: ReadingPreferences): ReadingPreferences {
-  return { source, target, range, ratio, syncScroll, highlight };
+function readingPreferences({ source, target, range, ratio, syncScroll, highlight, dualComments, replaceComments }: ReadingPreferences): ReadingPreferences {
+  return { source, target, range, ratio, syncScroll, highlight, dualComments, replaceComments };
 }
 
 function ConnectionStatus({ provider, status, testing }: { provider: ProviderId; status: ProviderStatus; testing: boolean }) {
@@ -366,6 +366,10 @@ function Options() {
         </section>
         <section className="panel reading-panel">
           <h3>阅读偏好</h3>
+          <label className="check"><input type="checkbox" checked={reading.dualComments} disabled={busy}
+            onChange={(event) => setReading({ ...reading, dualComments: event.target.checked })} /><span>在双栏中翻译代码注释</span></label>
+          <label className="check"><input type="checkbox" checked={reading.replaceComments} disabled={busy}
+            onChange={(event) => setReading({ ...reading, replaceComments: event.target.checked })} /><span>在原网页中翻译代码注释</span></label>
           <label className="check"><input type="checkbox" checked={reading.syncScroll} disabled={busy}
             onChange={(event) => setReading({ ...reading, syncScroll: event.target.checked })} /><span>默认开启同步滚动</span></label>
           <label className="check"><input type="checkbox" checked={reading.highlight} disabled={busy}

@@ -1,8 +1,24 @@
 import { defineConfig } from 'wxt';
+import { readdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import { AI_HOST_PERMISSION } from './src/shared/ai-settings';
 import { TRANSLATION_PROVIDERS } from './src/shared/reader-messages';
 
 export default defineConfig({
+  hooks: {
+    async 'build:publicAssets'(_wxt, files) {
+      const root = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
+      const copy = (source: string, dest = source) => files.push({ absoluteSrc: join(root, source), relativeDest: 'pdfjs/' + dest });
+      copy('legacy/build/pdf.worker.min.mjs', 'pdf.worker.mjs');
+      copy('LICENSE');
+      for (const directory of ['cmaps', 'standard_fonts', 'iccs', 'wasm']) {
+        for (const file of await readdir(join(root, directory))) {
+          if (!file.includes('quickjs') && !file.includes('QUICKJS')) copy(directory + '/' + file);
+        }
+      }
+    },
+  },
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'AlignRead',

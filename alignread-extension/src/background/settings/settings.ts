@@ -157,6 +157,7 @@ export function normalize(value: unknown): Preferences {
   const sites = Array.isArray(input.disabledSites) ? input.disabledSites : [];
   return {
     source: value.source, target: value.target, range: value.range,
+    dualComments: input.dualComments === true, replaceComments: input.replaceComments === true,
     ratio: typeof input.ratio === 'number' && Number.isFinite(input.ratio) ? clampRatio(input.ratio) : defaults.ratio,
     syncScroll: input.syncScroll !== false, highlight: input.highlight !== false,
     cache: input.cache !== false, authorized: input.authorized === true,
@@ -166,7 +167,7 @@ export function normalize(value: unknown): Preferences {
   };
 }
 
-export function isDisabled(hostname: string, settings: Preferences) {
+export function isDisabled(hostname: string, settings: Pick<Preferences, 'disabledSites'>) {
   const name = hostname.toLowerCase().replace(/\.$/, '');
   return settings.disabledSites.some((site) => name === site || name.endsWith('.' + site));
 }
