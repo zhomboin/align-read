@@ -1,4 +1,6 @@
-# Chrome 网上应用店上架材料
+# Chrome 网上应用店更新与发布
+
+AlignRead 已通过审核并上线。发布新版本时，在现有条目提交更新。 [商店详情](https://chromewebstore.google.com/detail/alignread/eknjmgokcpffbikmkcnahgmbgcmdjihf?hl=zh-CN) · [当前发布进度](progress.md#商店发布状态)
 
 ## 商店详情
 
@@ -86,6 +88,7 @@
    unzip -t "$zip"
    sha256sum "$zip"
    ```
-2. 登录 Chrome 网上应用店开发者后台，确认开发者账户和两步验证已设置。首次发布点击 **Add new item → Choose file → Upload**。已有商店条目时进入原条目的 **Package → Upload New Package**，版本号须高于已发布版本。 [开发者后台](https://chrome.google.com/webstore/devconsole) · [首次上传](https://developer.chrome.com/docs/webstore/publish) · [更新条目](https://developer.chrome.com/docs/webstore/update)
+2. 登录 Chrome 网上应用店开发者后台，打开 **AlignRead → Package → Upload New Package**，上传验收过的 ZIP。包版本号须高于商店已发布版本。 [开发者后台](https://chrome.google.com/webstore/devconsole) · [更新条目](https://developer.chrome.com/docs/webstore/update)
 3. 填写 **Store listing** 和 **Privacy**，在 **Distribution** 选择地区和可见性。如需提供给审核员的测试步骤和凭据，填写 **Test instructions**。
 4. 点击 **Submit for Review**。希望审核通过后自己决定上线时间，可以取消勾选自动发布。 [送审与延迟发布](https://developer.chrome.com/docs/webstore/publish#submit-your-item)
+5. 如选择手动发布，审核通过后在后台发布。打开公开条目，核对版本和上次更新日期，再同步项目首页、项目进度和版本记录。 [项目首页](../README.md) · [项目进度](progress.md) · [版本记录](version.md)

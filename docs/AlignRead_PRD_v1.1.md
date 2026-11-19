@@ -5,8 +5,8 @@
 > **产品定位**：智能双栏网页翻译与原译对照阅读  
 > **文档版本**：v1.1  
 > **需求基线日期**：2026-11-15  
-> **实现同步日期**为 2026-11-18\
-> **状态**为已实现双栏阅读、原位翻译、选词翻译和 AI 翻译接入。原位翻译列入待发布版本。 [项目进度](progress.md)\
+> **进度同步日期**为 2026-11-19\
+> **发布状态**为 Chrome 网上应用店 0.1.6 已审核通过并上线。主分支已实现原位翻译，列入后续商店更新。 [项目进度](progress.md)\
 > **产品平台**：Google Chrome 桌面浏览器，Manifest V3 扩展  
 > **参考产品**：[SplitTranslate](https://chromewebstore.google.com/detail/splittranslate-dual-pane/ikiphdehagbfmhenpdbeepgkebdgbkhi)（布局和对照阅读交互参考；不复制其代码、素材、品牌或未公开实现）
 
@@ -43,14 +43,14 @@
 |---|---|---|
 | 正式英文名称 | **AlignRead** | 产品 UI、正式文档、Chrome 商店优先使用 |
 | 中文名称 | **对阅** | 用于中文介绍、帮助文案和中文商店描述 |
-| 产品完整描述 | **AlignRead — 双栏网页翻译** | 商店展示名称候选，提交前核查平台要求 |
+| 商店展示名称 | **AlignRead** | 商店简介为「双栏网页翻译与原译对照阅读」 |
 | GitHub 项目仓库 | `alignread` | 默认建议；如需要独立扩展仓库，使用 `alignread-extension` |
 | 扩展工程目录 | `alignread-extension/` | 与未来后端服务、文档仓库区分 |
 | npm package 名 | `alignread-extension` | 发布前须检查 npm 命名可用性，不预设已注册 |
 | 文档主路径 | `docs/AlignRead_PRD_v1.1.md` | 当前仓库需求文档 |
 | 产品英文标语（候选） | *Read side by side. Understand in context.* | 非核心需求，视觉设计阶段可修改 |
 
-**命名说明**：本轮已确定项目使用 AlignRead（对阅），但尚未完成商标、域名、Chrome 商店与 npm 命名可用性核验。提交公开商店或注册商业品牌前，须完成重名与权利冲突检查；若最终品牌需要调整，不影响本 PRD 的功能与技术要求。
+商店条目与扩展包使用相同的英文名称。如需注册商业品牌，仍需单独核查商标与权利冲突。 [Chrome 网上应用店](https://chromewebstore.google.com/detail/alignread/eknjmgokcpffbikmkcnahgmbgcmdjihf?hl=zh-CN)
 
 ## 2. 用户与典型场景
 
@@ -466,7 +466,7 @@ interface TranslationSession {
 
 ## 14. 里程碑与当前进度
 
-双栏阅读已完成 M0 至 M3。M4 包含选词、AI 翻译、SPA 动态内容兼容和原位翻译。 [项目进度](progress.md) · [测试与验收](test-plan.md)
+双栏阅读已完成 M0 至 M3，扩展已在 Chrome 网上应用店上线。M4 的交付顺序见 [项目进度](progress.md#接下来做什么)。 [测试与验收](test-plan.md)
 
 ### 里程碑 M0：工程骨架与受控样本
 
@@ -501,9 +501,9 @@ interface TranslationSession {
 
 ### 里程碑 M4：后续增强（非 MVP）
 
-- 已实现选词翻译、AI 翻译及 SPA 增量翻译。
-- 后续包括段落双语与句子级对齐。
-- 网站规则、更多 Provider、本地模型与 PDF 专项列入后续迭代。
+- 选词翻译和 AI 翻译已进入商店版。新增 AI 服务预设、SPA 增量翻译和原位翻译已合入主分支，待商店更新。
+- P1 剩余段落双语（F-10、AC-P1-02）和句子级对齐（F-12、AC-P1-04）。
+- P2 包括词组级映射、本地翻译与更多服务、PDF 与复杂表格或公式适配、站点规则、术语表和语言检测优化（F-14 至 F-17）。
 
 ## 15. 项目交付物与工程管理
 
@@ -524,6 +524,7 @@ interface TranslationSession {
 5. 第一版保证段落级映射；句子级、词组级逐步增强，不承诺不可靠的精确映射。
 6. 强调页面可恢复性、权限最小化、明确外部翻译数据流。
 7. 项目正式名称为 **AlignRead（对阅）**；工程名称、文档、UI 文案与对外展示保持统一。
+8. Chrome 商店条目使用 **AlignRead**，后续版本沿用同一条目更新。 [商店发布指南](chrome-web-store.md)
 
 ### 16.2 当前实现决策
 
@@ -533,7 +534,6 @@ interface TranslationSession {
 
 ### 16.3 后续决策
 
-- **Chrome 商店展示与审核**：商店包内名称为 **AlignRead**，扩展图标和商店素材见 [上架材料](chrome-web-store.md)。
 - **站点适配优先级**：按后续兼容性回归和用户反馈补充代表性样本。
 
 ## 17. 参考资料与实现依据
