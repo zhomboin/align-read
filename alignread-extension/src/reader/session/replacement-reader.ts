@@ -2,7 +2,10 @@ import { browser } from 'wxt/browser';
 import { failure, success, type ErrorCode, type ReaderRequest, type Result, type Session } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
 import { canReplaceText, extractArticle, type Article } from '../extraction/document';
+import { MIN_WIDTH, viewportWidth } from '../layout/split';
+import { createReplacementToolbar } from '../ui/replacement-toolbar';
 import { createArticleIdentity } from './article-identity';
+import { createModeSwitch } from './mode-switch';
 import type { ActiveReader } from './reader';
 import { trackReplacementText } from './replacement-text';
 import { routeText, watchSourceChanges } from './source-changes';
@@ -17,6 +20,10 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   if (session.pageUrl && readReaderPage(session.pageUrl)?.key !== initialKey) return failure('stale');
 
   const lifecycle = new AbortController();
+  const toolbar = createReplacementToolbar();
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar, () => {
+    if (viewportWidth() < MIN_WIDTH) return 'narrow';
+  });
   const identity = createArticleIdentity();
   const replacement = trackReplacementText();
   const translation = createTranslation(session, lifecycle.signal, applyTranslations);
@@ -48,9 +55,16 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     extraction?.abort();
     clearTimeout(timer);
     replacement.restoreExcept();
+    toolbar.close();
     void browser.runtime.sendMessage({ type: 'closed', sessionId: session.id } satisfies ReaderRequest)
       .catch(() => undefined);
     afterClose(error);
+  }
+
+  function renderToolbar() {
+    if (closing) return;
+    toolbar.mount();
+    toolbar.render(modeSwitch(), () => close());
   }
 
   function checkPage() {
@@ -60,6 +74,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
       close('unsupported-page');
       return false;
     }
+    toolbar.mount();
     const hashChanged = pageHash !== location.hash;
     const bodyChanged = sourceBody !== document.body;
     pageHash = location.hash;
@@ -178,9 +193,11 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     }
   }
 
+  renderToolbar();
   scheduleRefresh(0);
   return success({
     id: session.id, state: translation.state, close: () => close(),
     pause: translation.pause, resume: translation.resume, retry: translation.retry, clearCache: translation.clearCache,
+    focusMode: toolbar.focusMode,
   });
 }

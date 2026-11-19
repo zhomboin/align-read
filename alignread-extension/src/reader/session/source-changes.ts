@@ -6,7 +6,7 @@ const extensionUi = '[data-alignread-host],[data-alignread-selection]';
 const ignored = 'script,style,noscript,template,iframe,canvas,svg,form,input,textarea,select,option';
 const attributes = [
   'aria-current', 'aria-hidden', 'aria-selected', 'aria-orientation', 'class', 'contenteditable', 'data-state',
-  'hidden', 'href', 'id', 'open', 'role', 'style', 'dir', 'start', 'reversed', 'value', 'colspan', 'rowspan', 'scope',
+  'hidden', 'inert', 'href', 'id', 'open', 'role', 'style', 'dir', 'start', 'reversed', 'value', 'colspan', 'rowspan', 'scope',
   'alt', 'src', 'width', 'height', 'data-ad-slot',
 ];
 const fittedStyles = new Set([
@@ -53,7 +53,7 @@ export function watchSourceChanges(
   observer.observe(document, {
     childList: true, characterData: true, attributes: true, attributeOldValue: true,
     characterDataOldValue: Boolean(replacement), subtree: true,
-    attributeFilter: replacement ? [...attributes, 'inert', 'translate'] : attributes,
+    attributeFilter: replacement ? [...attributes, 'translate'] : attributes,
   });
   signal.addEventListener('abort', () => observer.disconnect(), { once: true });
   const flush = () => process(observer.takeRecords());

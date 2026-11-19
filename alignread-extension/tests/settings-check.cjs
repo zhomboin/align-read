@@ -27,7 +27,7 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await resize(440);
   assert(await noOverflow());
   assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('body, .language-fields select'),
-    (element) => getComputedStyle(element).backgroundColor)`), Array(4).fill('rgb(255, 255, 255)'));
+    (element) => getComputedStyle(element).backgroundColor)`), Array(3).fill('rgb(255, 255, 255)'));
   assert(await evaluate(`document.querySelector('header button').getBoundingClientRect().height < 50`));
   assert(await evaluate(`Array.from(document.querySelectorAll('.language-fields select'), (select) => select.offsetWidth)
     .every((width) => width >= 190)`));
@@ -96,6 +96,10 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await resize(320);
   assert(await noOverflow());
   await nav('reading');
+  const range = () => evaluate('document.querySelector(".translation-range-field input[type=radio]:checked").value');
+  assert.equal(await range(), 'visible');
+  await click('.translation-range-field label:has(input[value=main])');
+  assert.equal(await range(), 'main');
   await evaluate(`fill(document.querySelector('.language-fields label:nth-child(2) select'), 'ja', 'change')`);
   await evaluate('document.querySelector("#original-width").focus()');
   await page('Input.dispatchKeyEvent', {type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39});
@@ -111,15 +115,18 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
   assert.equal(local.providerSettings.cache, false);
   assert.equal(local.providerSettings.target, 'zh-CN');
+  assert.equal(local.providerSettings.range, 'visible');
   assert.equal(local.providerSettings.ratio, .5);
   assert(await noOverflow());
 
   await evaluate(`fill(document.querySelector('#disabled-sites'), 'draft.example.test')`);
   await nav('reading');
   assert.equal(await evaluate('document.querySelector(".language-fields label:nth-child(2) select").value'), 'ja');
+  assert.equal(await range(), 'main');
   await click('button[type=submit]');
   await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已保存")'));
   assert.equal(local.providerSettings.target, 'ja');
+  assert.equal(local.providerSettings.range, 'main');
   assert.equal(local.providerSettings.ratio, .51);
   assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
   await nav('sites');
@@ -133,6 +140,7 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已恢复默认设置")'));
   assert.equal(await evaluate('document.querySelector("#disabled-sites").value'), '');
   assert.equal(local.providerSettings.target, 'zh-CN');
+  assert.equal(local.providerSettings.range, 'visible');
   assert.equal(local.providerSettings.youdao, null);
   setResponse('success');
 

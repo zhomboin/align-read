@@ -6,22 +6,26 @@ import {
 } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
 import { connectAlignment } from '../alignment/alignment';
-import { extractArticle, type Article } from '../extraction/document';
+import { extractArticle, type Article, type Mark } from '../extraction/document';
 import { createSplit, MIN_WIDTH, viewportWidth } from '../layout/split';
+import { focusReaderMode } from '../ui/reader-mode-controls';
 import { ReaderPanel } from '../ui/reader-panel';
 import css from '../ui/reader.css?inline';
 import { createArticleIdentity } from './article-identity';
+import { createModeSwitch } from './mode-switch';
 import { routeText, watchSourceChanges } from './source-changes';
 import { createTranslation } from './translation';
 
 export type ActiveReader = {
   id: string; state: () => ReaderState; close: () => void;
   pause: () => void; resume: () => void; clearCache: (disable?: boolean) => void;
+  focusMode: () => void;
   retry?: () => void;
 };
 
 const refreshDelay = 80;
 const layoutRecoveryTime = 400;
+const codeMarks = new Set<Mark>(['code', 'kbd', 'samp']);
 
 let dismissNotice: (() => void) | undefined;
 
@@ -37,6 +41,9 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let sync = session.syncScroll;
   let hover = session.highlight;
   let article: Article | undefined;
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, render, () => {
+    if (article && !article.blocks.some(({ pieces }) => pieces.some((piece) => piece.translate))) return 'no-text';
+  });
   const identity = createArticleIdentity();
   const translation = createTranslation(session, lifecycle.signal, render);
   let alignment: ReturnType<typeof connectAlignment> | undefined;
@@ -117,6 +124,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       locate={(id) => alignment?.locate('source', id)}
       retry={translation.retry}
       close={() => close()} setRatio={setRatio}
+      modeSwitch={modeSwitch()}
       toggleSync={() => { sync = !sync; render(); }}
       toggleHover={() => { hover = !hover; if (!hover) alignment?.paint(null); render(); }}
       togglePause={() => state().status === 'paused' ? translation.resume() : translation.pause()}
@@ -242,8 +250,12 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       if (!validSources(result)) { sourceChanged(); return; }
       const source = routeText(result);
       if (waitingForRoute && !source.size) return;
-      const hasText = result.blocks.some((block) => block.pieces.some((piece) => piece.translate && piece.text.trim()));
-      if (!hasText) {
+      const hasContent = result.blocks.some(({ tag, pieces }) => {
+        if (tag === 'pre') return true;
+        return pieces.some(({ translate, text, marks }) =>
+          translate || (text.trim() && marks.some((mark) => codeMarks.has(mark))));
+      });
+      if (!hasContent) {
         if (initialLayout && !waitingForRoute) { close('no-text'); return; }
         article = undefined;
         pageText.clear();
@@ -279,7 +291,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   scheduleRefresh(0);
   return success({
     id: session.id, state, close: () => close(), pause: translation.pause, resume: translation.resume,
-    clearCache: translation.clearCache,
+    clearCache: translation.clearCache, focusMode: () => focusReaderMode(split.shadow),
   });
 }
 

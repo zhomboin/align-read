@@ -23,13 +23,15 @@ type BranchTag = 'ul' | 'ol' | 'li' | 'blockquote' | 'table' | 'thead' | 'tbody'
 type Branch = {
   tag: BranchTag; children: ReadingNode[]; label?: string; span?: number; rowSpan?: number; start?: number;
   side?: SidebarLayout['side']; area?: 'sidebar' | 'content';
-  columns?: 'ltr' | 'rtl'; columnWeight?: number;
+  columns?: 'ltr' | 'rtl'; columnWeight?: number; listRow?: true;
   inlineRow?: { direction: 'ltr' | 'rtl'; align: 'start' | 'center' | 'end' | 'left' | 'right' };
+  compactRow?: { direction: 'ltr' | 'rtl'; scroll?: true; reverse?: true; rowGap: number; columnGap: number };
   navigation?: NavigationLayout; current?: boolean;
   surface?: Surface; disclosure?: 'open' | 'closed';
   listColumns?: number; marker?: string; reversed?: boolean; listValue?: number;
   scope?: string; align?: 'left' | 'right' | 'center' | 'start' | 'end' | 'justify';
   captionSide?: 'bottom';
+  codeCell?: true;
 };
 type ImagePlaceholder = { tag: 'image'; alt: string; width: number; height: number };
 export type ReadingNode = Block | Branch | ImagePlaceholder | { tag: 'hr' };
@@ -40,12 +42,13 @@ const excluded = [
   'input', 'textarea', 'select', 'button:not([role=tablist] [role=tab])', 'form', 'option',
   '[contenteditable]:not([contenteditable=false])',
   '[role=textbox]', '[role=button]', '[role=combobox]', '[role=dialog]', '[aria-hidden=true]', '[hidden]',
-  '[data-alignread-host]', '[data-ad-slot]', 'dialog',
+  '[data-alignread-host]', '[data-ad-slot]', '[inert]', 'dialog', '.monaco-editor', '.CodeMirror', '.cm-editor',
 ].join(',');
+const codeTextSelector = 'pre,code,kbd,samp,[role~=code]';
 const replacementExcluded = [
   excluded, 'button', '[role=searchbox]', '[role=spinbutton]', '[role=slider]',
-  'code', 'kbd', 'samp', 'pre', '.monaco-editor', '.CodeMirror', '.cm-editor',
-  '[inert]', '[translate=no i]', '.notranslate', '[data-alignread-selection]',
+  codeTextSelector,
+  '[translate=no i]', '.notranslate', '[data-alignread-selection]',
 ].join(',');
 const structural = new Set(['UL', 'OL', 'LI', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT',
   'TR', 'TD', 'TH', 'CAPTION', 'FIGURE', 'DETAILS', 'DL', 'DT', 'DD']);
@@ -56,7 +59,7 @@ const regions = new Map([
   ['HEADER', '页首'], ['NAV', '导航'], ['MAIN', '正文'], ['ARTICLE', '文章'],
   ['ASIDE', '侧栏'], ['FOOTER', '页脚'],
 ]);
-const semanticBlock = /^(P|H[1-6]|PRE|FIGCAPTION|SUMMARY)$/;
+const semanticBlock = /^(P|H[1-6]|FIGCAPTION|SUMMARY)$/;
 const protectedText = /(https?:\/\/[^\s<>]+|\bwww\.[^\s<>]+|\b[vV]?\d+(?:\.\d+)+(?:[-+][\w.]+)?\b|(?:^|(?<=\s))--?[a-z][\w-]*|\b[A-Za-z][\w]*(?:_[\w]+|\.[A-Za-z][\w]*|[a-z][A-Z][\w]*)\b|\b[\w.]+@[\w.-]+\.[A-Za-z]+\b)/g;
 const word = /\p{L}/u;
 const mainExcluded = 'nav,aside,footer,[role=navigation],[role=complementary],[role=banner],[role=contentinfo]';
@@ -64,7 +67,7 @@ const mainExcluded = 'nav,aside,footer,[role=navigation],[role=complementary],[r
 type TextRun = { node: Text; text: string; translate: boolean; marks: Mark[]; href?: string };
 const lineBreak = Symbol('lineBreak');
 type Run = TextRun | typeof lineBreak;
-type Column = { start: number; end: number; bounds: DOMRect };
+type Column = { start: number; end: number; bounds: DOMRect; element: HTMLElement; style: CSSStyleDeclaration };
 type NavigationLayout = { style: 'links' | 'tabs'; direction: 'ltr' | 'rtl'; vertical: boolean };
 type NavigationItem = { control: HTMLElement; bounds: DOMRect; current: boolean };
 
@@ -72,7 +75,7 @@ export function canReplaceText(node: Text) {
   const parent = node.parentElement;
   return node.getRootNode() === document && parent instanceof HTMLElement &&
     !(parent instanceof HTMLDetailsElement && !parent.open) &&
-    replacementAllowed(parent) && visibleContext(parent);
+    replacementAllowed(parent) && visibleContext(parent, true);
 }
 
 export async function extractArticle(
@@ -89,10 +92,12 @@ export async function extractArticle(
     signal.throwIfAborted();
   }
 
-  function allowed(element: HTMLElement) {
-    return (replacement ? replacementAllowed(element) : !element.matches(excluded)) &&
-      (!mainOnly || element !== sidebar?.sidebarBranch &&
-        (!element.matches(mainExcluded) || element.matches('[role=tablist]'))) && visible(element);
+  function readableStyle(element: HTMLElement) {
+    if (replacement ? !replacementAllowed(element) : element.matches(excluded)) return undefined;
+    if (mainOnly && (element === sidebar?.sidebarBranch ||
+        element.matches(mainExcluded) && !element.matches('[role=tablist]'))) return undefined;
+    const style = getComputedStyle(element);
+    return visible(element, style) ? style : undefined;
   }
 
   function sourceText(node: Text) {
@@ -123,24 +128,51 @@ export async function extractArticle(
     return entry;
   }
 
-  async function inline(node: Node, runs: Run[], marks: Mark[] = [], href?: string, locked = false) {
+  async function inline(
+    node: Node, runs: Run[], marks: Mark[] = [], href?: string, locked = false, codeLines = false,
+  ) {
     await pulse();
     if (node instanceof Text) {
       const text = sourceText(node);
       if (text) runs.push({ node, text, translate: !locked, marks, href });
       return;
     }
-    if (!(node instanceof HTMLElement) || !allowed(node)) return;
+    if (!(node instanceof HTMLElement)) return;
+    const style = readableStyle(node);
+    if (!style) return;
     if (node.tagName === 'BR') {
       runs.push(lineBreak);
       return;
     }
-    const mark: Mark | undefined = inlineTags[node.tagName as keyof typeof inlineTags];
+    const mark: Mark | undefined = inlineTags[node.tagName as keyof typeof inlineTags] ??
+      (node.matches('[role~=code]') ? 'code' : undefined);
     const newMarks = (mark ? [mark] : inlineEmphasis(node)).filter((item) => !marks.includes(item));
     const nextMarks = newMarks.length ? [...marks, ...newMarks] : marks;
-    const code = node.matches('code,kbd,samp,pre');
+    const preserveCode = locked || node.matches(codeTextSelector) || isCodeBlock(node, style);
+    if (replacement && preserveCode) return;
     const link = node instanceof HTMLAnchorElement ? safeLink(node.getAttribute('href')) : href;
-    for (const child of displayedChildren(node)) await inline(child, runs, nextMarks, link, locked || code);
+    const first = runs.length;
+    let previousWasBlock = false;
+    for (const child of displayedChildren(node)) {
+      if (codeLines && child instanceof Text && /^(normal|nowrap)$/.test(style.whiteSpace) &&
+          /[\r\n]/.test(child.data) && !child.data.trim()) continue;
+      const index = runs.length;
+      await inline(child, runs, nextMarks, link, preserveCode, codeLines);
+      if (!codeLines || runs.length === index) continue;
+      const childIsBlock = child instanceof HTMLElement && isBlockDisplay(getComputedStyle(child).display);
+      if (index > first && (previousWasBlock || childIsBlock)) {
+        const previous = runs[index - 1]!;
+        if (previous !== lineBreak && !/[\r\n]$/.test(previous.text)) runs.splice(index, 0, lineBreak);
+      }
+      previousWasBlock = childIsBlock;
+    }
+  }
+
+  async function copyCode(element: HTMLElement) {
+    if (replacement) return undefined;
+    const runs: Run[] = [];
+    await inline(element, runs, [], undefined, true, true);
+    return block(element, 'pre', runs);
   }
 
   async function readNavigation(element: HTMLElement): Promise<ReadingNode | undefined> {
@@ -149,11 +181,17 @@ export async function extractArticle(
     const items: NavigationItem[] = [];
     for (const child of element.children) {
       await pulse();
-      if (!(child instanceof HTMLElement) || !allowed(child)) continue;
+      if (!(child instanceof HTMLElement) || !readableStyle(child)) continue;
       const control = explicit
         ? child.matches('[role=tab]') ? child : child.querySelector<HTMLElement>('[role=tab]')
         : listLink(child);
-      if (!control || !allowed(control) || explicit && control.closest('[role=tablist]') !== element) return undefined;
+      if (!control || !readableStyle(control) || !visibleContext(control, true) ||
+          explicit && control.closest('[role=tablist]') !== element) {
+        const visibleRuns: Run[] = [];
+        await inline(child, visibleRuns);
+        if (visibleRuns.some((run) => run !== lineBreak && run.text.trim())) return undefined;
+        continue;
+      }
       const bounds = control.getBoundingClientRect();
       if (bounds.width > 0 && bounds.height > 0) items.push({
         control, bounds, current: isCurrent(control) || isCurrent(child),
@@ -193,9 +231,9 @@ export async function extractArticle(
       if (child instanceof Text && child.data.trim()) return undefined;
       if (!(child instanceof HTMLElement)) continue;
       await pulse();
-      if (!allowed(child)) continue;
+      const style = readableStyle(child);
+      if (!style) continue;
       if (!child.matches('span,a') || child.firstElementChild || !child.textContent?.trim()) return undefined;
-      const style = getComputedStyle(child);
       if (!/^inline(?:-(?:block|flex|grid))?$/.test(style.display) ||
           !/^(static|relative)$/.test(style.position) || style.cssFloat !== 'none') return undefined;
       atomic ||= style.display !== 'inline';
@@ -232,11 +270,15 @@ export async function extractArticle(
   async function visit(parent: HTMLElement): Promise<ReadingNode[]> {
     const result: ReadingNode[] = [];
     const columns: Column[] = [];
-    const layout = parent.children.length > 1 && parent !== sidebar?.row && !structural.has(parent.tagName)
+    const structuralParent = structural.has(parent.tagName);
+    const listItem = !replacement && parent.tagName === 'LI';
+    const layout = parent.children.length > 1 && parent !== sidebar?.row && (!structuralParent || listItem)
       ? getComputedStyle(parent) : undefined;
-    const inlineRow = !replacement && layout && await readInlineRow(parent, layout);
+    const inlineRow = !replacement && !structuralParent && layout && await readInlineRow(parent, layout);
     if (inlineRow) return [inlineRow];
     const flexOrGrid = /^(inline-)?(flex|grid)$/.test(layout?.display ?? '');
+    const listRow = listItem && flexOrGrid;
+    const keepEmptyCells = listRow && layout?.display.endsWith('grid');
     let runs: Run[] = [];
     const flush = () => {
       const entry = block(parent, parent.matches('li,td,th,caption,dt,dd') ? 'span' : 'p', runs);
@@ -250,10 +292,11 @@ export async function extractArticle(
         if (text) runs.push({ node: child, text, translate: true, marks: [] });
         continue;
       }
-      if (!(child instanceof HTMLElement) || !allowed(child)) continue;
+      if (!(child instanceof HTMLElement)) continue;
+      const style = readableStyle(child);
+      if (!style) continue;
       const tag = child.tagName;
-      const style = layout ? getComputedStyle(child) : undefined;
-      const bounds = style && columnBounds(child, style, flexOrGrid);
+      const bounds = layout && (!structuralParent || listRow) && columnBounds(child, style, flexOrGrid, keepEmptyCells);
       if (bounds) flush();
       const start = result.length;
       const area = !mainOnly && sidebar?.row === parent
@@ -272,28 +315,39 @@ export async function extractArticle(
       } else if (image || tag === 'HR') {
         flush();
         result.push(image || { tag: 'hr' });
+      } else if (isCodeBlock(child, style)) {
+        flush();
+        if (replacement) continue;
+        const entry = await copyCode(child);
+        if (structural.has(tag)) {
+          const branch = structure(child, entry ? [entry] : [], style);
+          if (child instanceof HTMLTableCellElement) branch.codeCell = true;
+          result.push(branch);
+        } else if (entry) {
+          result.push(entry);
+        }
       } else if (semanticBlock.test(tag)) {
         flush();
         const group: Run[] = [];
         await inline(child, group);
         const entry = block(child, tag.toLowerCase() as Block['tag'], group);
         if (entry) result.push(entry);
-      } else if (structural.has(tag) || regions.has(tag) || isContainer(child, style?.display)) {
+      } else if (structural.has(tag) || regions.has(tag) || isContainer(child, style.display)) {
         flush();
         const children = await visit(child);
-        if (!children.length) continue;
-        const computed = style ?? getComputedStyle(child);
-        const surface = surfaceContainers.has(tag) ? readSurface(computed) : undefined;
-        if (structural.has(tag)) {
-          result.push(structure(child, children, computed, surface));
-        } else if (regions.has(tag)) {
-          result.push({ tag: 'section', children, label: regions.get(tag), surface });
-        } else if (surface || child.parentElement?.tagName === 'DL') {
-          result.push({ tag: 'div', children, surface });
-        } else {
-          result.push(...children);
+        if (children.length || !replacement && child instanceof HTMLTableCellElement) {
+          const surface = surfaceContainers.has(tag) && style.display !== 'contents' ? readSurface(style) : undefined;
+          if (structural.has(tag)) {
+            result.push(structure(child, children, style, surface));
+          } else if (regions.has(tag)) {
+            result.push({ tag: 'section', children, label: regions.get(tag), surface });
+          } else if (surface || child.parentElement?.tagName === 'DL') {
+            result.push({ tag: 'div', children, surface });
+          } else {
+            result.push(...children);
+          }
         }
-      } else if (bounds || tag === 'A' && isBlockDisplay((style ?? getComputedStyle(child)).display)) {
+      } else if (bounds || tag === 'A' && isBlockDisplay(style.display)) {
         flush();
         const group: Run[] = [];
         await inline(child, group);
@@ -302,7 +356,9 @@ export async function extractArticle(
       } else {
         await inline(child, runs);
       }
-      if (bounds && start < result.length) columns.push({ start, end: result.length, bounds });
+      if (bounds && (start < result.length || keepEmptyCells)) {
+        columns.push({ start, end: result.length, bounds, element: child, style });
+      }
     }
     flush();
     if (!mainOnly && sidebar?.row === parent) {
@@ -314,10 +370,19 @@ export async function extractArticle(
         return result.filter((node) => node !== menu).map((node) => node === content ? row : node);
       }
     }
-    return arrangeColumns(result, columns, layout?.direction === 'rtl' ? 'rtl' : 'ltr');
+    const compact = !replacement && !structuralParent && layout && compactFlexRow(parent, result, columns, layout);
+    return compact ? [compact] : arrangeColumns(result, columns, layout?.direction === 'rtl' ? 'rtl' : 'ltr', listRow);
   }
 
-  const nodes = visibleContext(scope) && (!replacement || replacementAllowed(scope)) ? await visit(scope) : [];
+  let nodes: ReadingNode[] = [];
+  if (visibleContext(scope, Boolean(replacement)) && (!replacement || replacementAllowed(scope))) {
+    if (scope.matches(codeTextSelector) || isCodeBlock(scope, getComputedStyle(scope))) {
+      const entry = await copyCode(scope);
+      if (entry) nodes.push(entry);
+    } else {
+      nodes = await visit(scope);
+    }
+  }
   return { nodes, blocks, scope };
 }
 
@@ -413,10 +478,11 @@ function displayedChildren(element: HTMLElement): Iterable<Node> {
   return element.childNodes;
 }
 
-function visibleContext(element: HTMLElement) {
-  if (element.closest(excluded)) return false;
+function visibleContext(element: HTMLElement, excludeCode = false) {
+  if (element.closest(excluded) || (excludeCode && element.closest(codeTextSelector))) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-    if (!visible(ancestor)) return false;
+    const style = getComputedStyle(ancestor);
+    if (!visible(ancestor, style) || excludeCode && isCodeBlock(ancestor, style)) return false;
     if (ancestor instanceof HTMLDetailsElement && !ancestor.open && ancestor !== element) {
       const summary = Array.from(ancestor.children).find((child) => child.tagName === 'SUMMARY');
       if (!summary?.contains(element)) return false;
@@ -425,19 +491,35 @@ function visibleContext(element: HTMLElement) {
   return true;
 }
 
-function visible(element: HTMLElement) {
-  const style = getComputedStyle(element);
-  return style.display !== 'none' && style.visibility === 'visible' && style.opacity !== '0' &&
-    style.contentVisibility !== 'hidden';
+function visible(element: HTMLElement, style = getComputedStyle(element)) {
+  if (style.display === 'none' || style.visibility !== 'visible' || style.opacity === '0' ||
+      style.contentVisibility === 'hidden') return false;
+  if (!element.hasChildNodes() || style.display === 'contents' || style.display === 'inline') return true;
+  const clipX = style.overflowX === 'hidden' || style.overflowX === 'clip';
+  const clipY = style.overflowY === 'hidden' || style.overflowY === 'clip';
+  if (!clipX && !clipY) return true;
+  // A collapsed drawer or visually hidden label can still have visible computed styles.
+  return !(clipX && element.clientWidth <= 1 || clipY && element.clientHeight <= 1);
 }
 
-function isContainer(element: HTMLElement, display?: string) {
-  if (element.matches('a,b,strong,i,em,code,kbd,samp,span,br')) return false;
-  return isBlockDisplay(display ?? getComputedStyle(element).display);
+function isContainer(element: HTMLElement, display: string) {
+  if (element.matches('a,b,strong,i,em,code,kbd,samp,br')) return false;
+  return display === 'contents' || element.tagName !== 'SPAN' && isBlockDisplay(display);
 }
 
 function isBlockDisplay(display: string) {
   return /^(block|flex|grid|inline-flex|inline-grid|flow-root|table|list-item)/.test(display);
+}
+
+function isCodeBlock(element: HTMLElement, style: CSSStyleDeclaration) {
+  if (element.tagName === 'PRE') return true;
+  if (element.matches('ul,ol,dl,table,thead,tbody,tfoot,tr')) return false;
+  const explicit = element.matches(codeTextSelector);
+  if (style.display === 'contents') return explicit;
+  if (style.display !== 'inline-block' && !isBlockDisplay(style.display)) return false;
+  return explicit ||
+    /^(pre|pre-wrap|break-spaces)$/.test(style.whiteSpace) &&
+    /(?:^|,)\s*(?:ui-)?monospace\s*(?:,|$)/i.test(style.fontFamily);
 }
 
 function listLink(item: HTMLElement) {
@@ -506,14 +588,82 @@ function placeholderFor(element: HTMLElement): ImagePlaceholder | undefined {
   return { tag: 'image', alt: image.alt, width: Math.round(width), height: Math.round(height) };
 }
 
-function columnBounds(element: HTMLElement, style: CSSStyleDeclaration, flexOrGrid: boolean) {
+function columnBounds(element: HTMLElement, style: CSSStyleDeclaration, flexOrGrid: boolean, keepEmptyCells?: boolean) {
   if (style.position !== 'static' && style.position !== 'relative') return undefined;
   if (!flexOrGrid && style.cssFloat === 'none' && !/^inline-(block|flex|grid)$/.test(style.display)) return undefined;
   const bounds = element.getBoundingClientRect();
-  return bounds.width > 1 && bounds.height > 1 ? bounds : undefined;
+  if (bounds.width <= 1) return undefined;
+  if (bounds.height > 1) return bounds;
+  // A centered empty grid item still occupies a horizontal track.
+  if (keepEmptyCells) return new DOMRect(bounds.x, bounds.y - 1, bounds.width, 2);
 }
 
-function arrangeColumns(nodes: ReadingNode[], columns: Column[], direction: 'ltr' | 'rtl') {
+function compactFlexRow(
+  parent: HTMLElement, nodes: ReadingNode[], columns: Column[], layout: CSSStyleDeclaration,
+): Branch | undefined {
+  if (!/^(inline-)?flex$/.test(layout.display) || !layout.flexDirection.startsWith('row') ||
+      columns.length < 2 || columns.length !== nodes.length) return undefined;
+  if (!parent.closest('header,nav,[role=banner],[role=navigation],[role=tablist]') &&
+      columns.some(({ element, style }) => style.flexGrow !== '0' && !element.matches('a,span,small,time,kbd'))) return undefined;
+
+  const maxHeight = Math.max(48, Number.parseFloat(layout.fontSize) * 4);
+  if (!columns.every(({ start, end, bounds }, index) =>
+    start === index && end === index + 1 && bounds.height <= maxHeight && compactContent(nodes[index]!))) return undefined;
+
+  const ordered = [...columns].sort((a, b) => Number(a.style.order) - Number(b.style.order));
+  return {
+    tag: 'div',
+    compactRow: {
+      direction: layout.direction === 'rtl' ? 'rtl' : 'ltr',
+      scroll: /^(auto|scroll)$/.test(layout.overflowX) || undefined,
+      reverse: layout.flexDirection === 'row-reverse' || undefined,
+      rowGap: compactGap(layout.rowGap, 5),
+      columnGap: compactGap(layout.columnGap, 7),
+    },
+    children: ordered.map((column) => {
+      const node = nodes[column.start]!;
+      if ('pieces' in node && !node.inlineAppearance) node.inlineAppearance = compactAppearance(column, layout);
+      return { tag: 'div', current: isCurrent(column.element), children: [node] };
+    }),
+  };
+}
+
+function compactContent(node: ReadingNode): boolean {
+  if ('pieces' in node) {
+    return /^(p|span|h[1-6])$/.test(node.tag) && !node.pieces.some((piece) => piece.lineBreak) &&
+      node.pieces.reduce((size, piece) => size + piece.text.length, 0) <= 120;
+  }
+  if (!('children' in node)) return false;
+  if (node.compactRow || node.inlineRow || node.navigation) return true;
+  return (node.tag === 'div' || node.tag === 'section') && !node.side && !node.area &&
+    node.children.length === 1 && compactContent(node.children[0]!);
+}
+
+function compactGap(value: string, fallback: number) {
+  return value.endsWith('px') ? Math.min(14, Number.parseFloat(value)) : fallback;
+}
+
+function compactAppearance(column: Column, layout: CSSStyleDeclaration) {
+  let element = column.element;
+  let style = column.style;
+  // Links can wrap a smaller labeled box that supplies the border and padding.
+  for (let depth = 0; depth < 3 && !readSurface(style); depth++) {
+    const children = [...element.children].filter((child): child is HTMLElement =>
+      child instanceof HTMLElement && !child.matches(excluded) && visible(child));
+    const inner = children[0];
+    if (children.length !== 1 || !inner || !inner.textContent?.trim()) break;
+    const bounds = inner.getBoundingClientRect();
+    if (bounds.width < 2 || bounds.height < column.bounds.height * .6) break;
+    element = inner;
+    style = getComputedStyle(inner);
+  }
+  return {
+    ...readInlineAppearance(style, layout),
+    fontWeight: style.fontWeight !== layout.fontWeight ? style.fontWeight : undefined,
+  };
+}
+
+function arrangeColumns(nodes: ReadingNode[], columns: Column[], direction: 'ltr' | 'rtl', listRow: boolean) {
   if (columns.length < 2) return nodes;
   const result: ReadingNode[] = [];
   let offset = 0;
@@ -536,12 +686,12 @@ function arrangeColumns(nodes: ReadingNode[], columns: Column[], direction: 'ltr
       index++;
     }
 
-    if (row.length < 2) continue;
+    if (row.length < 2 || row.every(({ start, end }) => start === end)) continue;
     row.sort((a, b) => a.bounds.left - b.bounds.left);
     if (row.some(({ bounds }, position) => position > 0 && row[position - 1]!.bounds.right > bounds.left + 1)) continue;
     if (direction === 'rtl') row.reverse();
     result.push(...nodes.slice(offset, first.start), {
-      tag: 'div', columns: direction,
+      tag: 'div', columns: direction, listRow: listRow || undefined,
       children: row.map(({ start, end, bounds }) => ({
         tag: 'div', columnWeight: bounds.width, children: nodes.slice(start, end),
       })),

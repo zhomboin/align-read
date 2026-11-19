@@ -134,7 +134,10 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
 
   const command = (type, session) => evaluate(`selectionCommand(${JSON.stringify({type, session})})`);
   const enable = (id) => command('selection:start', {id, source: 'en', target: 'zh-CN'});
-  const pick = (id, start, end) => evaluate(`pick(${JSON.stringify(id)}, ${start ?? 'undefined'}, ${end ?? 'undefined'})`);
+  const pick = (id, start, end) => evaluate(`{
+    pick(${JSON.stringify(id)}, ${start ?? 'undefined'}, ${end ?? 'undefined'});
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }`);
   const visible = (className) => evaluate(`selectionShadow?.querySelector('.${className}')?.hidden === false`);
   const content = (className) => evaluate(`selectionShadow.querySelector('.${className}').textContent`);
   async function click(className) {

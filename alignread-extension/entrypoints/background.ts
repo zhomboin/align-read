@@ -83,12 +83,16 @@ async function clearGrant(tabId: number, kind: SessionKind, sessionId?: string) 
   const grant = await getGrant(tabId, kind);
   if (!grant || (sessionId && sessionId !== grant.session.id)) return;
   const key = grantKey(tabId, kind);
+  cancelSessionJob(key, grant.session.id);
+  await browser.storage.session.remove(key);
+}
+
+function cancelSessionJob(key: string, sessionId: string) {
   const job = jobs.get(key);
-  if (job?.sessionId === grant.session.id) {
+  if (job?.sessionId === sessionId) {
     job.controller.abort();
     jobs.delete(key);
   }
-  await browser.storage.session.remove(key);
 }
 
 async function stopSessions(matches: (grant: Grant) => boolean) {
@@ -383,6 +387,9 @@ async function reader(tabId: number, documentId: string, senderUrl: string | und
     if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) {
       return { result: failure('stale') };
     }
+    if (message.type === 'switch-mode') {
+      return { result: await switchReaderMode(tabId, grant, senderUrl, message) };
+    }
     if (message.type === 'closed') {
       await clearGrant(tabId, 'reader', message.sessionId);
       return { result: success(null) };
@@ -411,6 +418,45 @@ async function reader(tabId: number, documentId: string, senderUrl: string | und
     return { result: queueBatch(tabId, 'reader', grant, message) };
   });
   return accepted.result;
+}
+
+async function switchReaderMode(
+  tabId: number, grant: Grant, senderUrl: string | undefined,
+  message: Extract<ReaderRequest, { type: 'switch-mode' }>,
+) {
+  const { mode, pageUrl } = message;
+  if (!isReaderMode(mode) || mode === (grant.session.mode ?? 'dual') || typeof pageUrl !== 'string') {
+    return failure('unavailable');
+  }
+  if (!senderUrl || readReaderPage(pageUrl)?.key !== readReaderPage(senderUrl)?.key) return failure('stale');
+  const pageFailure = await verifyReaderPage(tabId, grant, pageUrl);
+  if (pageFailure) return pageFailure;
+  const settings = await getSettings();
+  if (settings.revision !== grant.revision || settings.provider !== grant.provider) return failure('stale');
+  if (isDisabled(grant.hostname, settings)) return failure('site-disabled');
+  if (!(await hasProviderPermission(settings, grant.provider))) return failure('consent-required');
+  if ((await getSettings()).revision !== grant.revision) return failure('stale');
+
+  const key = grantKey(tabId, 'reader');
+  const session: Session = {
+    ...grant.session, id: crypto.randomUUID(), mode, pageUrl, ratio: settings.ratio,
+    cache: grant.session.cache && settings.cache,
+  };
+  const result = await send(tabId, grant.documentId, {
+    type: 'reader:switch-mode', previousSessionId: grant.session.id, session,
+  }).catch(() => undefined);
+  if (!result?.ok) return result ?? failure('unavailable');
+
+  cancelSessionJob(key, grant.session.id);
+  // The tab queue holds new batches until the reader accepts the switch and the grant is saved.
+  try {
+    await browser.storage.session.set({ [key]: { ...grant, session } satisfies Grant });
+  } catch {
+    await send(tabId, grant.documentId, { type: 'reader:stop' }).catch(() => undefined);
+    await clearGrant(tabId, 'reader', grant.session.id).catch(() => undefined);
+    return failure('unavailable');
+  }
+  return result;
 }
 
 async function selection(tabId: number, documentId: string, url: string | undefined, message: SelectionRequest) {

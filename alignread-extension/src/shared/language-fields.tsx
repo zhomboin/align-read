@@ -1,7 +1,12 @@
-import { LANGUAGES, type Language, type ReadingOptions, type ReadingRange, type SourceLanguage } from './reader-messages';
+import { LANGUAGES, type Language, type ReadingOptions, type SourceLanguage } from './reader-messages';
+import { SegmentedControl } from './segmented-control';
 
 type Props = { value: ReadingOptions; change: (value: ReadingOptions) => void; locked?: boolean };
 const languages = Object.entries(LANGUAGES);
+const ranges = [
+  { value: 'visible', label: '整页可见文字' },
+  { value: 'main', label: '仅正文' },
+] as const;
 
 export function LanguageFields({ value, change, locked }: Props) {
   return <fieldset className="language-fields" disabled={locked}>
@@ -16,11 +21,7 @@ export function LanguageFields({ value, change, locked }: Props) {
         {languages.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
       </select>
     </label>
-    <label className="full">翻译范围
-      <select value={value.range} onChange={(event) => change({ ...value, range: event.target.value as ReadingRange })}>
-        <option value="visible">整页可见文字</option>
-        <option value="main">仅正文</option>
-      </select>
-    </label>
+    <SegmentedControl label="翻译范围" className="translation-range-field full" options={ranges}
+      value={value.range} change={(range) => change({ ...value, range })} disabled={locked} />
   </fieldset>;
 }

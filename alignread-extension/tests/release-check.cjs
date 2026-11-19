@@ -9,6 +9,8 @@ const {checkSelectionPage, checkSelectionPopup, checkSelectionWorker} = require(
 const {checkSettings} = require('./settings-check.cjs');
 const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
 const {checkInlineRow} = require('./inline-row-check.cjs');
+const {checkHeaderLayout} = require('./header-layout-check.cjs');
+const {checkRepositoryLayout} = require('./repository-layout-check.cjs');
 const {checkAiPresets} = require('./ai-presets-check.cjs');
 const {checkSpaBrowser, checkSpaWorker, spaFixturePath} = require('./spa-check.cjs');
 const {checkReplacementBrowser, checkReplacementPopup, replacementFixturePath} = require('./replacement-check.cjs');
@@ -90,13 +92,20 @@ function startWorker() {
           delete tab.selectionId;
           return null;
         }
-        if (message.type === 'reader:start') {
+        if (message.type === 'reader:start' || message.type === 'reader:switch-mode') {
+          if (message.type === 'reader:switch-mode' && tab.readerSessionId !== message.previousSessionId) {
+            return {ok: false, error: 'stale'};
+          }
           if (tab.layoutFailure) return {ok: false, error: 'layout-start'};
+          tab.readerSessionId = message.session.id;
           tab.readerState = {status: 'preparing', total: 0, done: 0, failed: 0};
           if (message.session.mode) tab.readerState.mode = message.session.mode;
           return {ok: true, value: tab.readerState};
         }
-        if (message.type === 'reader:stop') delete tab.readerState;
+        if (message.type === 'reader:stop') {
+          delete tab.readerState;
+          delete tab.readerSessionId;
+        }
         if (message.type === 'reader:retry') tab.readerRetryMode = tab.readerState?.mode;
         return tab.readerState ?? null;
       },
@@ -392,7 +401,7 @@ async function checkBrowser() {
     });
     await page('Fetch.enable', {patterns: [{urlPattern: 'http://alignread.test/*'}]});
     async function checkReplacement() {
-      await checkReplacementPopup({page, evaluate, until, request, saveYoudao, tabs, grants, session,
+      await checkReplacementPopup({page, evaluate, until, request, dispatch, saveYoudao, tabs, grants, session, calls,
         youdaoOrigin, tabId: selectionPopupTab});
       await checkReplacementBrowser({page, evaluate, until, build});
     }
@@ -718,6 +727,9 @@ async function checkBrowser() {
     await evaluate('readerCommand({type:"reader:stop"})');
     await page('Emulation.setDeviceMetricsOverride', {width: 1440, height: 900, deviceScaleFactor: 1, mobile: false});
     console.log('Reading structure coverage passed for surfaces, line breaks, lists, disclosures, figures and wide tables.');
+
+    await checkHeaderLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
+    await checkRepositoryLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
 
     await replaceFixture(fixture.replace('</article>',
       '<form><input type="password" value="fixture-password"><textarea>fixture-textarea</textarea></form></article>'));

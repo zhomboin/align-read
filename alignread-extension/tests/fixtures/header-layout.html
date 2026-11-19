@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Field Kit browser</title>
+  <style>
+    body { margin: 0; color: #213634; font: 16px/1.5 sans-serif; }
+    header, main { padding: 12px 20px; }
+    header { border-bottom: 1px solid #d8e0dc; }
+    .top, .links, .chips, .tabs, .metadata {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .top { flex-wrap: wrap; }
+    .links { margin: 0; padding: 0; list-style: none; }
+    .links a, .brand { white-space: nowrap; }
+    .brand { color: #213634; font-weight: 700; }
+    h1 { margin: 4px 0; }
+    .chips { flex-wrap: wrap; margin: 6px 0; }
+    .tag { display: block; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+      color: #17483a; background: #e0efe7; border: 1px solid #8ab7a8; border-radius: 14px;
+    }
+    .license { width: fit-content; margin: 4px 0; }
+    .tabs { overflow-x: auto; margin: 8px 0; }
+    .tabs a { display: inline-flex; flex: none; padding: 3px 8px; white-space: nowrap; }
+    .tabs .active { border-bottom: 2px solid #349076; font-weight: 700; }
+    .metadata { flex-wrap: wrap; margin: 6px 0; }
+    .panels { display: flex; gap: 12px; }
+    .panels > div { flex: 1; border: 1px solid #d8e0dc; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="top">
+      <a class="brand" href="https://example.com/catalog/home"><span>Vector Workshop</span></a>
+      <form><label>Browser query controls<input type="search" value="fixture-search"></label></form>
+      <nav aria-label="Catalog">
+        <ul class="links">
+          <li><a href="https://example.com/catalog/guides"><span>Guides</span></a></li>
+          <li><a href="https://example.com/catalog/tools"><span>Tools</span></a></li>
+          <li><a href="https://example.com/catalog/kits"><span>Kits</span></a></li>
+          <li>
+            <button type="button">Hidden menu control</button>
+            <ul inert><li><a href="https://example.com/catalog/private">Inactive menu item</a></li></ul>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <h1>Field Kit collection</h1>
+    <div class="chips">
+      <a class="tag" href="https://example.com/topics/signal"><div class="pill"><svg aria-hidden="true" width="12" height="12"><circle cx="6" cy="6" r="3" fill="currentColor"/></svg><span>Signal processing</span></div></a>
+      <a class="tag" href="https://example.com/topics/terrain"><div class="pill"><span>Terrain</span></div></a>
+      <a class="tag" href="https://example.com/topics/catalog"><div class="pill"><span>Map</span></div></a>
+      <a class="tag" href="https://example.com/topics/systems"><div class="pill"><span>Scan</span></div></a>
+      <a class="tag" href="https://example.com/topics/field"><div class="pill"><span>Field</span></div></a>
+    </div>
+    <div class="pill license"><span>License</span><a href="https://example.com/terms">Integration terms</a></div>
+    <div class="tabs">
+      <a href="https://example.com/field/overview"><span>Collection overview</span></a>
+      <a class="active" aria-current="page" href="https://example.com/field/versions"><span>Files and version notes</span></a>
+      <a href="https://example.com/field/community"><span>Community workbench</span></a>
+    </div>
+    <div class="metadata">
+      <a href="https://example.com/metadata/branch">Stable branch</a>
+      <a class="pill" href="https://example.com/metadata/revision"><span>Revision details</span></a>
+      <a href="https://example.com/metadata/history">Review history</a>
+    </div>
+    <p>Browse the field kit entries and select the documentation you need.</p>
+    <div class="panels">
+      <div><a href="https://example.com/notes/fixtures">Fixture notes</a></div>
+      <div><a href="https://example.com/notes/measurements">Measurements</a></div>
+    </div>
+  </main>
+</body>
+</html>
