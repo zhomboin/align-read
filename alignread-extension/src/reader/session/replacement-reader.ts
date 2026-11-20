@@ -3,6 +3,7 @@ import { failure, success, type ErrorCode, type ReaderRequest, type Result, type
 import { readReaderPage } from '../../shared/reader-page';
 import { canReplaceText, extractArticle, type Article } from '../extraction/document';
 import { displayComment } from '../extraction/code-comments';
+import { findReadingLayer, layerIsOpen, readingLayerChange } from '../layout/site-reading-view';
 import { MIN_WIDTH, viewportWidth } from '../layout/split';
 import { createReplacementToolbar } from '../ui/replacement-toolbar';
 import { createArticleIdentity } from './article-identity';
@@ -21,8 +22,12 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   const { key: initialKey, origin } = initialPage;
   if (session.pageUrl && readReaderPage(session.pageUrl)?.key !== initialKey) return failure('stale');
 
+  const readingView = findReadingLayer();
+  if (!readingView.ok) return readingView;
+  const layer = readingView.value;
+
   const lifecycle = new AbortController();
-  const toolbar = createReplacementToolbar();
+  const toolbar = createReplacementToolbar(layer?.element);
   const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar, () => {
     if (viewportWidth() < MIN_WIDTH) return 'narrow';
   });
@@ -71,6 +76,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
 
   function checkPage() {
     if (closing) return false;
+    if (layer && !layerIsOpen(layer)) { close('reading-view-changed'); return false; }
     const next = readReaderPage(location.href);
     if (!next || next.origin !== origin) {
       close('unsupported-page');
@@ -131,11 +137,13 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     const controller = new AbortController();
     extraction = controller;
     try {
+      const viewError = readingLayerChange(layer);
+      if (viewError) { close(viewError); return; }
       const result = await extractArticle(session.range, controller.signal, undefined, (node) => {
         if (replacement.siteControls(node)) return true;
         const previous = outgoing.get(node);
         return Boolean(previous && previous.key !== viewKey && previous.text === replacement.readText(node));
-      }, replacement, session.replaceComments);
+      }, replacement, session.replaceComments, session.replaceComments, layer);
       flushChanges();
       if (closing || current !== revision || controller.signal.aborted) return;
 
@@ -189,7 +197,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
       let applied = true;
       for (const [node, fragments] of block.replacements) {
         const isComment = fragments.some((fragment) => typeof fragment !== 'string' && fragment.comment);
-        if (!canReplaceText(node, isComment)) {
+        if (!canReplaceText(node, isComment, layer)) {
           replacement.restore(node);
           applied = false;
           continue;
@@ -205,6 +213,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     }
   }
 
+  document.addEventListener('fullscreenchange', sourceChanged, { signal: lifecycle.signal });
   renderToolbar();
   scheduleRefresh(0);
   return success({

@@ -1,5 +1,6 @@
 import { clampRatio } from '../../shared/reader-messages';
 import { createContentFit } from './fit-content';
+import type { ReadingLayer } from './site-reading-view';
 import { findSidebarLayout } from './sidebar';
 
 export const MIN_WIDTH = 960;
@@ -11,8 +12,14 @@ export function viewportWidth() {
 export function createSplit(
   getRatio: () => number,
   onUnsafe: (why: 'narrow' | 'incompatible') => void,
+  layer?: ReadingLayer,
 ) {
-  let sourceViewport = document.body;
+  const fullscreen = layer && document.fullscreenElement === layer.element;
+  const readingViewport = layer && (fullscreen ? layer.article : layer.element);
+  const sourceAttribute = 'data-alignread-source';
+  const sourceId = 'r' + Math.random().toString(36).slice(2);
+  const previousId = readingViewport?.getAttribute(sourceAttribute);
+  let sourceViewport = readingViewport ?? document.body;
   let sidebar = findSidebarLayout(sourceViewport);
   const host = document.createElement('div');
   host.setAttribute('data-alignread-host', '');
@@ -22,6 +29,7 @@ export function createSplit(
     'box-sizing': 'border-box', margin: '0', padding: '0', border: '0', 'min-width': '0',
     'max-width': 'none', 'pointer-events': 'auto', visibility: 'visible', width: 'min(380px, 100vw)',
   })) host.style.setProperty(property, value, 'important');
+  if (layer) host.popover = 'manual';
   const shadow = host.attachShadow({ mode: 'closed' });
   const container = document.createElement('div');
   shadow.append(container);
@@ -36,14 +44,15 @@ export function createSplit(
   let originalScroll: ReturnType<typeof captureScroll> | undefined;
 
   function mountHost() {
-    const root = document.documentElement;
+    const root = layer?.element ?? document.documentElement;
     // Both overlays share a z-index, so keep the selection overlay above the reader.
     root.insertBefore(host, root.querySelector(':scope > [data-alignread-selection]'));
+    if (layer && host.isConnected && !host.matches(':popover-open')) host.showPopover();
   }
 
   function captureScroll() {
     const { scrollLeft, scrollTop } = sourceViewport;
-    const bodyScrolls = document.scrollingElement !== sourceViewport &&
+    const bodyScrolls = Boolean(layer) || document.scrollingElement !== sourceViewport &&
       (scrollLeft !== 0 || scrollTop !== 0 ||
         (/^(auto|scroll)$/.test(getComputedStyle(sourceViewport).overflowY) &&
           sourceViewport.scrollHeight > sourceViewport.clientHeight + 2));
@@ -67,8 +76,8 @@ export function createSplit(
     host.style.setProperty('width', (width - leftWidth) + 'px', 'important');
     // The fixed body isolates its stacking order without re-anchoring fixed descendants.
     sheet.replaceSync(`
-      :root { overflow: hidden !important; }
-      :root > body {
+      ${layer ? '' : ':root { overflow: hidden !important; }'}
+      ${layer ? `[${sourceAttribute}="${sourceId}"]` : ':root > body'} {
         position: fixed !important;
         inset: 0 auto auto 0 !important;
         width: ${leftWidth}px !important;
@@ -85,9 +94,14 @@ export function createSplit(
     `);
   }
 
+  function hasContext() {
+    if (!readingViewport || !layer) return !document.fullscreenElement && sourceViewport === document.body;
+    return readingViewport.isConnected && (fullscreen ? document.fullscreenElement === layer.element : !document.fullscreenElement);
+  }
+
   function verify() {
     if (viewportWidth() < MIN_WIDTH) return 'narrow';
-    if (document.fullscreenElement || sourceViewport !== document.body) return 'incompatible';
+    if (!hasContext()) return 'incompatible';
     const left = sourceViewport.getBoundingClientRect();
     const right = host.getBoundingClientRect();
     const css = getComputedStyle(sourceViewport);
@@ -106,9 +120,9 @@ export function createSplit(
   }
 
   function restoreContext() {
-    const body = document.body;
-    const root = document.documentElement;
-    if (!root || !body?.isConnected) return false;
+    const body = readingViewport ?? document.body;
+    const root = layer?.element ?? document.documentElement;
+    if (!root || !body?.isConnected || !root.isConnected) return false;
     const replacedBody = sourceViewport !== body;
     const movedHost = host.parentNode !== root;
     if (replacedBody) {
@@ -150,6 +164,7 @@ export function createSplit(
 
   return {
     container, shadow, restoreContext,
+    hasContext,
     get sourceViewport() { return sourceViewport; },
     get sidebar() { return sidebar; },
     refreshSidebar() {
@@ -163,8 +178,9 @@ export function createSplit(
     },
     activate() {
       if (viewportWidth() < MIN_WIDTH) return 'narrow' as const;
-      if (document.fullscreenElement || sourceViewport !== document.body) return 'incompatible' as const;
+      if (!hasContext()) return 'incompatible' as const;
       originalScroll = captureScroll();
+      readingViewport?.setAttribute(sourceAttribute, sourceId);
       host.style.setProperty('bottom', '0', 'important');
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
       position();
@@ -192,9 +208,13 @@ export function createSplit(
         const { windowX, windowY, bodyX, bodyY, bodyScrolls } = originalScroll;
         const returnToBody = active && bodyScrolls;
         const returnToWindow = active && !bodyScrolls;
-        if (document.body === sourceViewport) {
+        if (readingViewport?.getAttribute(sourceAttribute) === sourceId) {
+          if (previousId == null) readingViewport.removeAttribute(sourceAttribute);
+          else readingViewport.setAttribute(sourceAttribute, previousId);
+        }
+        if (sourceViewport.isConnected) {
           sourceViewport.scrollTo({ left: returnToBody ? scrollLeft : bodyX, top: returnToBody ? scrollTop : bodyY, behavior: 'instant' });
-          window.scrollTo({ left: returnToWindow ? scrollLeft : windowX, top: returnToWindow ? scrollTop : windowY, behavior: 'instant' });
+          if (!layer) window.scrollTo({ left: returnToWindow ? scrollLeft : windowX, top: returnToWindow ? scrollTop : windowY, behavior: 'instant' });
         }
       }
       host.remove();

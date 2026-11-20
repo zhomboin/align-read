@@ -83,6 +83,8 @@ Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发�
 
 ### 原位翻译
 
+开启翻译时先识别当前网页的阅读正文。页面声明阅读模式时，优先选取可见的文章区域。有明确阅读标记的独立弹层使用自身的正文和滚动区域，译文工具栏挂在同一层。关闭或替换弹层会结束该视图的会话。浏览器原生阅读面板由 Chrome 管理。 [阅读视图识别](../alignread-extension/src/reader/layout/site-reading-view.ts) · [Chrome 页面访问权限](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab)
+
 原位会话复用可见文字提取、段落身份和翻译队列。按文字节点边界送译，保留原网页的标签、属性、样式和事件。跨标签的句子可能拆开送译。原位模式在窄窗口也可使用，右上角浮条提供模式选择和恢复原文操作，并与双栏工具栏共用进度组件。组件读取当前会话的段落计数，包括已复用的译文。 [文字提取](../alignread-extension/src/reader/extraction/document.ts) · [原位会话](../alignread-extension/src/reader/session/replacement-reader.ts)
 
 扩展在会话内存记录每个已改节点的原文和最后写入的译文。应用译文前检查节点仍在页面上、原文与提取时一致且仍可翻译。动态提取读取已改节点的原文，避免将译文再次送译。等待或失败的段落继续显示原文。 [文字替换记录](../alignread-extension/src/reader/session/replacement-text.ts)

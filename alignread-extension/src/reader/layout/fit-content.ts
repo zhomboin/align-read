@@ -84,7 +84,7 @@ export function createContentFit(body: HTMLElement) {
 
   function fixedWithin(root: HTMLElement, elements: Set<HTMLElement>) {
     function collect(element: Element) {
-      if (element !== body && element instanceof HTMLElement && getComputedStyle(element).position === 'fixed' &&
+      if (element !== body && !element.hasAttribute('data-alignread-host') && element instanceof HTMLElement && getComputedStyle(element).position === 'fixed' &&
           element.offsetParent === null && element.offsetWidth > 0) elements.add(element);
     }
     collect(root);
