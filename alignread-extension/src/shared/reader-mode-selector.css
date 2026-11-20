@@ -1,0 +1,59 @@
+.mode-selector { min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; border: 0; }
+.mode-selector legend { padding: 0; margin: 0 0 2px; color: #52655b; font-size: 12px; line-height: 1.4; font-weight: 600; }
+.mode-track-control { display: inline-flex; align-items: center; gap: 6px; border-radius: 5px; }
+.mode-track-control .mode-name {
+  appearance: none;
+  min-block-size: 32px;
+  padding: 0 2px;
+  margin: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #52655b;
+  background: transparent;
+  box-shadow: none;
+  font: 500 14px/1.35 system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mode-track-control .mode-name[aria-pressed="true"] { color: #194c38; font-weight: 700; background: transparent; }
+.mode-track-control .mode-name:enabled:hover { text-decoration: underline; text-underline-offset: 3px; }
+.mode-track-control input[type="range"] {
+  appearance: none;
+  width: 44px;
+  height: 32px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+.mode-track-control input::-webkit-slider-runnable-track {
+  height: 24px;
+  padding: 3px;
+  border-radius: 99px;
+  background: #286149;
+  box-shadow: inset 0 0 0 1px #1c503d;
+}
+.mode-track-control input::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px #10332255;
+}
+.mode-track-control input:focus-visible { outline: 2px solid #236749; outline-offset: 2px; }
+.mode-selector:disabled .mode-track-control { opacity: .55; }
+.mode-selector:disabled :is(input, button) { cursor: default; }
+@media (pointer: coarse) {
+  .mode-track-control .mode-name, .mode-track-control input[type="range"] { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .mode-track-control input::-webkit-slider-runnable-track { forced-color-adjust: none; background: ButtonFace; outline: 1px solid ButtonText; box-shadow: none; }
+  .mode-track-control input::-webkit-slider-thumb { forced-color-adjust: none; background: Highlight; box-shadow: none; }
+  .mode-track-control input:focus-visible { outline-color: Highlight; }
+}

@@ -3,6 +3,7 @@ import { errors, LANGUAGES, LIMITS, type ReaderState, type Session } from '../..
 import type { Piece, ReadingNode } from '../extraction/document';
 import type { BlockStatus } from '../session/translation';
 import { ReaderModeControl, type ReaderModeSwitch } from './reader-mode-controls';
+import { ReaderProgress } from './reader-progress';
 import { MathView } from './math-view';
 import { displayComment } from '../extraction/code-comments';
 
@@ -17,11 +18,6 @@ type Props = {
   setRatio: (ratio: number, final: boolean) => void;
   toggleSync: () => void; toggleHover: () => void; togglePause: () => void;
   modeSwitch: ReaderModeSwitch;
-};
-
-const summaries = {
-  preparing: '正在提取页面内容', translating: '正在翻译', paused: '已暂停',
-  partial: '译文分批显示', ready: '翻译完成', error: '翻译遇到问题',
 };
 
 export function ReaderPanel(props: Props) {
@@ -62,7 +58,7 @@ export function ReaderPanel(props: Props) {
           {props.nodes.length > 0 && <>
             <button type="button" disabled={modeSwitch.pending} aria-pressed={sync} onClick={props.toggleSync}>同步滚动</button>
             <button type="button" disabled={modeSwitch.pending} aria-pressed={hover} onClick={props.toggleHover}>悬停高亮</button>
-            {!state.error && state.done + state.failed < state.total && <button type="button"
+            {!state.error && (state.status === 'translating' || state.status === 'paused' || state.done + state.failed < state.total) && <button type="button"
               disabled={modeSwitch.pending} onClick={props.togglePause}>
               {state.status === 'paused' ? '继续' : '暂停'}
             </button>}
@@ -72,11 +68,7 @@ export function ReaderPanel(props: Props) {
           </>}
         </div>
         {modeSwitch.error && <p className="mode-switch-error" role="status">{errors[modeSwitch.error]}</p>}
-        <div className="status" role="status">
-          {state.error ? errors[state.error] : state.status === 'ready' && state.total === 0 ? '已显示原文' : summaries[state.status]}
-          {state.total > 0 && <span>{state.done}/{state.total}{state.failed ? ' · 失败 ' + state.failed : ''}</span>}
-        </div>
-        {state.total > 0 && <progress aria-label="翻译进度" max={state.total} value={state.done + state.failed} />}
+        <ReaderProgress state={state} />
       </header>
       <div className="scroll" ref={props.captureScroll} tabIndex={0}
         onPointerOver={(event) => props.onHover(blockId(event.target))}

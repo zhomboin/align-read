@@ -99,15 +99,23 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
     let total = 0;
     let done = 0;
     let failed = 0;
+    let pendingInFailedBlock = false;
     for (const entry of work.values()) {
       if (!entry.parts.length) continue;
       total++;
       const result = status(entry.block.id);
       if (result === 'done') done++;
-      else if (result === 'failed') failed++;
+      else if (result === 'failed') {
+        failed++;
+        pendingInFailedBlock ||= entry.parts.some((part) => !part.error && part.translated === undefined);
+      }
     }
-    const phase = error ? 'error' : paused ? 'paused' : held && !work.size ? 'preparing' : done + failed === total
-      ? failed ? 'partial' : 'ready' : done || failed ? 'partial' : 'translating';
+    let phase: ReaderState['status'] = 'translating';
+    if (error) phase = 'error';
+    else if (paused) phase = 'paused';
+    else if (held && !work.size) phase = 'preparing';
+    else if (done === total) phase = 'ready';
+    else if ((done || failed) && !(done + failed === total && pendingInFailedBlock)) phase = 'partial';
     return { status: phase, total, done, failed, error, cacheBytes };
   }
 
