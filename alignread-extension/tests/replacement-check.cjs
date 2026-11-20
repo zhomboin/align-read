@@ -47,9 +47,11 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   assert.deepEqual(await request({type: 'start', tabId, provider: 'youdao', mode: 'invalid',
     options: {source: 'en', target: 'zh-CN', range: 'main'}}, 'popup'), {ok: false, error: 'unavailable'});
   assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
-  tab.readerState = {mode: 'replace', status: 'partial', total: 2, done: 1, failed: 1};
+  tab.readerState = {mode: 'replace', status: 'partial', total: 2, done: 1, failed: 1,
+    options: {source:'auto', target:'zh-CN', range:'main'}};
   await page('Page.reload');
   await shown('重试失败项');
+  assert.equal(await evaluate(`${checked(range)}.value`), 'main');
   assert.equal(await evaluate(`${checked(mode)}.value`), 'replace');
   await click('重试失败项');
   await until(() => tab.readerRetryMode === 'replace');
@@ -58,10 +60,15 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   await pick(mode, 'dual');
   await click('切换为双栏');
   await shown('关闭双栏');
+  assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
   assert.equal(session[`reader:${tabId}`].session.mode, 'dual');
   assert.equal(tab.selectionId, selectionId);
   await pick(mode, 'replace');
   await click('切换为原位翻译');
+  await shown('恢复原文');
+  assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
+  await click('重新翻译');
+  await until(() => tab.lastReaderCommand === 'reader:start');
   await shown('恢复原文');
   await click('恢复原文');
   await shown('开启原位翻译');
@@ -268,6 +275,7 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   assert.equal(await evaluate('readerShadows().length'), 0);
   await require('./paper-check.cjs').checkPaper({evaluate, until, mode:'replace', readerState:() => command('state'),
     replaceFixture: html => evaluate('document.body.innerHTML = ' + JSON.stringify(html))});
+  await require('./mode-reuse-check.cjs').checkModeReuse({evaluate, until});
   console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
 

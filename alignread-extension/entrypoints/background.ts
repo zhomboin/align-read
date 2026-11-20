@@ -363,6 +363,13 @@ async function popup(message: PopupMessage) {
     highlight: view.highlight, syncScroll: view.syncScroll, cache: view.cache && !sensitive,
     ...(message.type === 'start' && { pageUrl: tab.url, mode: message.mode ?? 'dual' }),
   };
+  if (kind === 'reader' && state?.mode && state.mode !== session.mode && (state.status !== 'error' || state.total > 0)) {
+    const previous = await getGrant(tabId, 'reader');
+    if (previous?.documentId === documentId && previous.revision === settings.revision && previous.provider === settings.provider &&
+        (!sensitive || readReaderPage(previous.pageUrl)?.key === readReaderPage(tab.url)?.key)) {
+      return switchReaderSession(tabId, previous, session);
+    }
+  }
   await clearGrant(tabId, kind);
   await browser.storage.session.set({
     [grantKey(tabId, kind)]: { session, documentId, hostname: url.hostname, revision: settings.revision,
@@ -439,11 +446,15 @@ async function switchReaderMode(
   if (!(await hasProviderPermission(settings, grant.provider))) return failure('consent-required');
   if ((await getSettings()).revision !== grant.revision) return failure('stale');
 
-  const key = grantKey(tabId, 'reader');
   const session: Session = {
     ...grant.session, id: crypto.randomUUID(), mode, pageUrl, ratio: settings.ratio,
     cache: grant.session.cache && settings.cache,
   };
+  return switchReaderSession(tabId, grant, session);
+}
+
+async function switchReaderSession(tabId: number, grant: Grant, session: Session) {
+  const key = grantKey(tabId, 'reader');
   const result = await send(tabId, grant.documentId, {
     type: 'reader:switch-mode', previousSessionId: grant.session.id, session,
   }).catch(() => undefined);

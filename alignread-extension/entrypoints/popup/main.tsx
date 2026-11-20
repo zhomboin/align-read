@@ -61,7 +61,7 @@ function Popup() {
         setPage(result.value);
         if (!initialized.current) {
           initialized.current = true;
-          setChoice(result.value.settings);
+          setChoice(result.value.reader?.options ?? result.value.settings);
           setError(undefined);
         }
       } else if (!initialized.current) setError(result.error);
