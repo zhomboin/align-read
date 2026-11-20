@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF 对照阅读 · AlignRead</title></head>
+<body><header><h1>PDF 对照阅读</h1>
+<label class="file-button">选择 PDF<input id="file" type="file" accept=".pdf,application/pdf"></label>
+<button id="settings">翻译设置</button></header>
+<main><div class="toolbar" aria-label="PDF 阅读操作">
+<button id="prev" disabled>上一页</button><label>页码 <input id="page" type="number" min="1" value="1" disabled></label>
+<span id="total"></span><button id="next" disabled>下一页</button>
+<label>原文 <select id="source"></select></label><label>译为 <select id="target"></select></label>
+<button id="translate" disabled>翻译本页</button><button id="cancel" hidden>取消翻译</button></div>
+<p id="status" role="status">请选择 PDF 文件。</p>
+<div class="columns" hidden><section><h2>原页</h2><div id="original"></div></section>
+<section><h2>译文</h2><div id="lines"></div></section></div></main>
+<script type="module" src="./main.ts"></script></body></html>

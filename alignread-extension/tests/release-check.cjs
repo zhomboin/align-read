@@ -16,6 +16,11 @@ const {checkSpaBrowser, checkSpaWorker, spaFixturePath} = require('./spa-check.c
 const {checkReplacementBrowser, checkReplacementPopup, replacementFixturePath} = require('./replacement-check.cjs');
 
 const selectionOnly = process.argv.includes('--selection');
+const {checkPaper} = require('./paper-check.cjs');
+const {checkPdfBrowser} = require('./pdf-check.cjs');
+const {initBrowser} = require('./browser-bridge.cjs');
+const {event, checkPdfWorker} = require('./pdf-worker-check.cjs');
+const pdfOnly = process.argv.includes('--pdf');
 const settingsOnly = process.argv.includes('--settings');
 const layoutOnly = process.argv.includes('--layout');
 const spaOnly = process.argv.includes('--spa');
@@ -65,11 +70,13 @@ function revokePermission(host) {
 function startWorker() {
   const chrome = {
     runtime: {
+      onConnect: event(),
       id, getURL: (suffix) => origin + suffix,
       onMessage: { addListener(handler) { listener = handler; } },
       async getPlatformInfo() { heartbeats++; return {}; },
     },
     storage: {
+      onChanged: event(),
       local: { ...storage(local), async setAccessLevel(value) { assert.equal(value.accessLevel, 'TRUSTED_CONTEXTS'); } },
       session: storage(session),
     },
@@ -113,7 +120,7 @@ function startWorker() {
     permissions: {
       async contains({origins}) { return origins.every((host) => grants.has(host)); },
       async remove({origins}) { for (const host of origins) revokePermission(host); },
-      onRemoved: {addListener(handler) { permissionRemoved = handler; }},
+      onRemoved: event(),
     },
     scripting: {
       async executeScript({target, files}) {
@@ -158,7 +165,9 @@ function startWorker() {
       return Response.json({data: {translations: [{translatedText: '你好，世界！'}]}});
     },
   });
+  permissionRemoved = chrome.permissions.onRemoved.emit;
   vm.runInContext(fs.readFileSync(path.join(build, 'background.js'), 'utf8'), context);
+  return chrome;
 }
 function dispatch(message, sender) {
   return new Promise(resolve => {
@@ -405,6 +414,7 @@ async function checkBrowser() {
         youdaoOrigin, tabId: selectionPopupTab});
       await checkReplacementBrowser({page, evaluate, until, build});
     }
+    if (pdfOnly) return await checkPdfBrowser({page, evaluate, until, build});
     if (replacementOnly) return await checkReplacement();
     if (spaOnly) return await checkSpaBrowser({page, evaluate, until, build});
     if (!layoutOnly) {
@@ -416,6 +426,7 @@ async function checkBrowser() {
       await checkSettings({page, evaluate, until, manifest, request, local, grants,
         setPermission: (value) => { permitted = value; }, setResponse});
       if (settingsOnly) return;
+      await checkPdfBrowser({page, evaluate, until, build});
     }
 
     await page('Page.navigate', {url: 'about:blank'});
@@ -729,6 +740,7 @@ async function checkBrowser() {
     console.log('Reading structure coverage passed for surfaces, line breaks, lists, disclosures, figures and wide tables.');
 
     await checkHeaderLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
+    await checkPaper({evaluate, until, replaceFixture, readerState});
     await checkRepositoryLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
 
     await replaceFixture(fixture.replace('</article>',
@@ -945,34 +957,11 @@ function initReader() {
   };
 }
 
-function initBrowser(version, tabId) {
-  const requests = new Map();
-  let sequence = 0;
-  function request(message) {
-    return new Promise(resolve => {
-      const id = ++sequence;
-      requests.set(id, resolve);
-      alignreadRequest(JSON.stringify({id, message}));
-    });
-  }
-  globalThis.openedOptions = 0;
-  globalThis.chrome ??= {};
-  chrome.runtime = {id: 'alignread-test', getManifest: () => ({version}), sendMessage: request,
-    async openOptionsPage() { globalThis.openedOptions += 1; }};
-  chrome.tabs = {async query() { return [{id: tabId}]; }};
-  chrome.permissions = {request: ({origins}) => request({type: 'mock-permission', origins})};
-  globalThis.completeRequest = (id, result) => {
-    const resolve = requests.get(id);
-    requests.delete(id);
-    resolve(result);
-  };
-  globalThis.fill = (node, value, event = 'input') => {
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), 'value').set.call(node, value);
-    node.dispatchEvent(new Event(event, {bubbles: true}));
-  };
-}
 async function run() {
-  if (layoutOnly) return checkBrowser();
+  if (pdfOnly || !(layoutOnly || spaOnly || replacementOnly || selectionOnly || settingsOnly)) {
+    await checkPdfWorker({chrome:startWorker(), origin, id, sample, calls, grants, googleOrigin, local});
+  }
+  if (layoutOnly || pdfOnly) return checkBrowser();
   if (replacementOnly) { startWorker(); return checkBrowser(); }
   if (selectionOnly || settingsOnly || spaOnly) startWorker();
   else await checkWorker();

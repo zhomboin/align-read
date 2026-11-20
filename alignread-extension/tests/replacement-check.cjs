@@ -266,6 +266,8 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   assert.equal(await content('#next-page'), 'Next page phrase');
   await assertOriginalLayout();
   assert.equal(await evaluate('readerShadows().length'), 0);
+  await require('./paper-check.cjs').checkPaper({evaluate, until, mode:'replace', readerState:() => command('state'),
+    replaceFixture: html => evaluate('document.body.innerHTML = ' + JSON.stringify(html))});
   console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
 

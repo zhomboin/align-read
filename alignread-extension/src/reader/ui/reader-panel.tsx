@@ -3,6 +3,8 @@ import { errors, LANGUAGES, LIMITS, type ReaderState, type Session } from '../..
 import type { Piece, ReadingNode } from '../extraction/document';
 import type { BlockStatus } from '../session/translation';
 import { ReaderModeControl, type ReaderModeSwitch } from './reader-mode-controls';
+import { MathView } from './math-view';
+import { displayComment } from '../extraction/code-comments';
 
 type Props = {
   session: Session; state: ReaderState; nodes: ReadingNode[];
@@ -175,8 +177,9 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
 }
 
 function pieceView(piece: Piece, text: string): ReactNode {
+  if (piece.formula) return <MathView key={piece.id} formula={piece.formula} />;
   if (piece.lineBreak) return <br key={piece.id} />;
-  let value: ReactNode = text;
+  let value: ReactNode = piece.comment ? displayComment(piece.text, text) : text;
   for (const mark of piece.marks) value = createElement(mark, null, value);
   if (piece.href) return <a key={piece.id} href={piece.href} target="_blank" rel="noopener noreferrer">{value}</a>;
   return <span key={piece.id}>{value}</span>;

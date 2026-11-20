@@ -74,6 +74,7 @@ npm run test:selection
 npm run check
 npm run build
 npm run test:layout
+npm run test:pdf
 ```
 
 修改原位翻译时，在扩展目录检查类型、构建并运行原位翻译定向测试。

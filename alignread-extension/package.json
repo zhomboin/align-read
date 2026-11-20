@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^22.12.0 || >=24.0.0"
+    "node": "^22.13.0 || >=24.0.0"
   },
   "scripts": {
     "dev": "wxt --browser chrome --mv3",
@@ -13,6 +13,7 @@
     "check": "wxt prepare && tsc --noEmit",
     "test:settings": "node tests/release-check.cjs --settings",
     "test:selection": "node tests/release-check.cjs --selection",
+    "test:pdf": "node tests/release-check.cjs --pdf",
     "test:layout": "node tests/release-check.cjs --layout",
     "test:spa": "node tests/release-check.cjs --spa",
     "test:replace": "node tests/release-check.cjs --replace",
@@ -20,10 +21,14 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
+    "pdfjs-dist": "6.5.438",
+    "prismjs": "1.30.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/prismjs": "1.26.6",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@wxt-dev/module-react": "1.2.2",

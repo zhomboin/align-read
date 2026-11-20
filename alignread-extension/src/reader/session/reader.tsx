@@ -42,7 +42,8 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let hover = session.highlight;
   let article: Article | undefined;
   const modeSwitch = createModeSwitch(session, lifecycle.signal, render, () => {
-    if (article && !article.blocks.some(({ pieces }) => pieces.some((piece) => piece.translate))) return 'no-text';
+    if (article && !article.blocks.some(({ pieces }) =>
+      pieces.some((piece) => piece.comment ? session.replaceComments : piece.translate))) return 'no-text';
   });
   const identity = createArticleIdentity();
   const translation = createTranslation(session, lifecycle.signal, render);
@@ -244,7 +245,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       const result = await extractArticle(session.range, controller.signal, split.sidebar, (node) => {
         const previous = outgoing.get(node);
         return Boolean(previous && previous.key !== key && previous.text === node.data);
-      });
+      }, undefined, session.dualComments, session.dualComments || session.replaceComments);
       flushChanges();
       if (controller.signal.aborted || lifecycle.signal.aborted || current !== revision) return;
       if (!validSources(result)) { sourceChanged(); return; }
@@ -253,7 +254,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       const hasContent = result.blocks.some(({ tag, pieces }) => {
         if (tag === 'pre') return true;
         return pieces.some(({ translate, text, marks }) =>
-          translate || (text.trim() && marks.some((mark) => codeMarks.has(mark))));
+          translate || (text.trim() && marks.some((mark) => codeMarks.has(mark)))) || pieces.some((piece) => piece.formula);
       });
       if (!hasContent) {
         if (initialLayout && !waitingForRoute) { close('no-text'); return; }

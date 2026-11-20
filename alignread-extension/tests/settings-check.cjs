@@ -96,6 +96,9 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await resize(320);
   assert(await noOverflow());
   await nav('reading');
+  const commentFlags = () => [...document.querySelectorAll('label')].filter(label => label.textContent.includes('翻译代码注释')).map(label => label.querySelector('input'));
+  assert.deepEqual(await evaluate('(' + commentFlags + ')().map(input => input.checked)'), [false, false]);
+  await evaluate('(' + commentFlags + ')()[0].click()');
   const range = () => evaluate('document.querySelector(".translation-range-field input[type=radio]:checked").value');
   assert.equal(await range(), 'visible');
   await click('.translation-range-field label:has(input[value=main])');
@@ -128,6 +131,8 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   assert.equal(local.providerSettings.target, 'ja');
   assert.equal(local.providerSettings.range, 'main');
   assert.equal(local.providerSettings.ratio, .51);
+  assert.equal(local.providerSettings.dualComments, true);
+  assert.equal(local.providerSettings.replaceComments, false);
   assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
   await nav('sites');
   assert.equal(await evaluate('document.querySelector("#disabled-sites").value'), 'draft.example.test');
