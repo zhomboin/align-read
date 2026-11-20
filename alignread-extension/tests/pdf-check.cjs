@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 
 function fixturePdf() {
-  const lines = 'BT /F1 14 Tf 20 150 Td (Ordinary prose) Tj 0 -25 Td (x = 2) Tj ET';
+  const lines = 'BT /F1 14 Tf 20 150 Td (Ordinary prose) Tj 0 -25 Td (x = 2) Tj 0 -25 Td (Let a + b be positive) Tj ET';
   const pages = '/Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >>';
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>',
     '<< ' + pages + ' /Contents 5 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',

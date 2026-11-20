@@ -8,7 +8,9 @@ import { TRANSLATION_PROVIDERS } from './src/shared/reader-messages';
 export default defineConfig({
   hooks: {
     async 'build:publicAssets'(_wxt, files) {
-      const root = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
+      const resolve = createRequire(import.meta.url).resolve;
+      const root = dirname(resolve('pdfjs-dist/package.json'));
+      files.push({ absoluteSrc: resolve('prismjs/LICENSE'), relativeDest: 'licenses/prismjs.txt' });
       const copy = (source: string, dest = source) => files.push({ absoluteSrc: join(root, source), relativeDest: 'pdfjs/' + dest });
       copy('legacy/build/pdf.worker.min.mjs', 'pdf.worker.mjs');
       copy('LICENSE');

@@ -3,7 +3,7 @@ import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 
 export type PdfLine = { text: string; keep: boolean; bounds: [number, number, number, number]; };
 const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)|mono|courier|cmtt/i;
-const mathText = /[=∑∏∫√≤≥≠≈≃±∂∇∞∈∉∀∃∝⊗⊕→↦⇔∥α-ωΑ-Ω]|[\u{1d400}-\u{1d7ff}]/u;
+const mathText = /[\p{Sm}α-ωΑ-Ω\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
 const looksLikeCode = /[{}]|;\s*$|(?:=>|:=|\/\/|\/\*|\w+\([^)]*\)|\w+\s*[_^]\s*[\w{])|^\s*(?:#|def |class |import |return |const |let |function )/;
 
 export async function pageLines(page: PDFPageProxy) {
