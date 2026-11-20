@@ -1,3 +1,4 @@
+import { pageReadingArticle, type ReadingLayer } from '../layout/site-reading-view';
 import type { ReadingRange } from '../../shared/reader-messages';
 import { commentParts, markComments, type CommentRange } from './code-comments';
 import { formulaSelector, readFormula, texExpression, type Formula } from './formulas';
@@ -44,8 +45,8 @@ const excluded = [
   'script', 'style', 'noscript', 'template', 'iframe', 'canvas', 'svg', 'audio', 'video', 'object',
   'input', 'textarea', 'select', 'button:not([role=tablist] [role=tab])', 'form', 'option',
   '[contenteditable]:not([contenteditable=false])',
-  '[role=textbox]', '[role=button]', '[role=combobox]', '[role=dialog]', '[aria-hidden=true]', '[hidden]',
-  '[data-alignread-host]', '[data-ad-slot]', '[inert]', 'dialog', '.monaco-editor', '.CodeMirror', '.cm-editor',
+  '[role=textbox]', '[role=button]', '[role=combobox]', '[aria-hidden=true]', '[hidden]',
+  '[data-alignread-host]', '[data-ad-slot]', '[inert]', '.monaco-editor', '.CodeMirror', '.cm-editor',
 ].join(',');
 const codeTextSelector = 'pre,code,kbd,samp,[role~=code]';
 const replacementExcluded = [
@@ -75,11 +76,11 @@ type Column = { start: number; end: number; bounds: DOMRect; element: HTMLElemen
 type NavigationLayout = { style: 'links' | 'tabs'; direction: 'ltr' | 'rtl'; vertical: boolean };
 type NavigationItem = { control: HTMLElement; bounds: DOMRect; current: boolean };
 
-export function canReplaceText(node: Text, isComment = false) {
+export function canReplaceText(node: Text, isComment = false, layer?: ReadingLayer) {
   const parent = node.parentElement;
   return node.getRootNode() === document && parent instanceof HTMLElement &&
     !(parent instanceof HTMLDetailsElement && !parent.open) &&
-    replacementAllowed(parent) && visibleContext(parent, !isComment);
+    replacementAllowed(parent, layer) && visibleContext(parent, !isComment, layer);
 }
 
 export async function extractArticle(
@@ -87,9 +88,10 @@ export async function extractArticle(
   replacement?: { readText(node: Text): string },
   translateComments = false,
   detectComments = translateComments,
+  layer?: ReadingLayer,
 ): Promise<Article> {
   const mainOnly = range === 'main';
-  const scope = (mainOnly ? mainContent(replacement ? replacementAllowed : undefined) : undefined) ?? document.body;
+  const scope = layer?.article ?? pageReadingArticle() ?? (mainOnly ? mainContent(replacement ? replacementAllowed : undefined) : undefined) ?? document.body;
   const blocks: Block[] = [];
   let visited = 0;
 
@@ -99,7 +101,7 @@ export async function extractArticle(
   }
 
   function readableStyle(element: HTMLElement) {
-    if (replacement ? !replacementAllowed(element) : element.matches(excluded)) return undefined;
+    if (replacement ? !replacementAllowed(element, layer) : element.matches(excluded) || outsideReadingDialog(element, layer)) return undefined;
     if (mainOnly && (element === sidebar?.sidebarBranch ||
         element.matches(mainExcluded) && !element.matches('[role=tablist]'))) return undefined;
     const style = getComputedStyle(element);
@@ -113,7 +115,7 @@ export async function extractArticle(
   function collectFormula(node: Node, runs: Run[]) {
     if (!(node instanceof Element) || !node.matches(formulaSelector)) return false;
     const style = getComputedStyle(node);
-    if (!replacement && !node.closest(excluded) && visible(node as HTMLElement, style)) {
+    if (!replacement && !node.closest(excluded) && !outsideReadingDialog(node, layer) && visible(node as HTMLElement, style)) {
       const formula = readFormula(node);
       runs.push({ element: node, text: formula.text, formula });
     }
@@ -215,7 +217,7 @@ export async function extractArticle(
       const control = explicit
         ? child.matches('[role=tab]') ? child : child.querySelector<HTMLElement>('[role=tab]')
         : listLink(child);
-      if (!control || !readableStyle(control) || !visibleContext(control, true) ||
+      if (!control || !readableStyle(control) || !visibleContext(control, true, layer) ||
           explicit && control.closest('[role=tablist]') !== element) {
         const visibleRuns: Run[] = [];
         await inline(child, visibleRuns);
@@ -337,7 +339,7 @@ export async function extractArticle(
       const couldBeNavigation = !replacement && !area && child.matches('ul,ol,[role=tablist]');
       if (couldBeNavigation) flush();
       const navigation = couldBeNavigation ? await readNavigation(child) : undefined;
-      const image = !area && placeholderFor(child);
+      const image = !area && placeholderFor(child, layer);
       if (area) {
         flush();
         const children = await visit(child);
@@ -406,7 +408,7 @@ export async function extractArticle(
   }
 
   let nodes: ReadingNode[] = [];
-  if (visibleContext(scope, Boolean(replacement) && !translateComments) && (!replacement || replacementAllowed(scope))) {
+  if (visibleContext(scope, Boolean(replacement) && !translateComments, layer) && (!replacement || replacementAllowed(scope, layer))) {
     if (scope.matches(codeTextSelector) || isCodeBlock(scope, getComputedStyle(scope))) {
       const entry = await copyCode(scope);
       if (entry) nodes.push(entry);
@@ -518,8 +520,13 @@ function replacementPieces(id: string, runs: TextRun[]) {
   return { pieces, replacements };
 }
 
-function replacementAllowed(element: HTMLElement) {
-  return document.designMode !== 'on' && !element.closest(replacementExcluded);
+function outsideReadingDialog(element: Element, layer?: ReadingLayer) {
+  const dialog = element.closest('dialog,[role=dialog]');
+  return Boolean(dialog && dialog !== layer?.element);
+}
+
+function replacementAllowed(element: HTMLElement, layer?: ReadingLayer) {
+  return document.designMode !== 'on' && !element.closest(replacementExcluded) && !outsideReadingDialog(element, layer);
 }
 
 function mainContent(allowed?: (element: HTMLElement) => boolean) {
@@ -538,8 +545,8 @@ function displayedChildren(element: HTMLElement): Iterable<Node> {
   return element.childNodes;
 }
 
-function visibleContext(element: HTMLElement, excludeCode = false) {
-  if (element.closest(excluded) || element.closest(formulaSelector) || (excludeCode && element.closest(codeTextSelector))) return false;
+function visibleContext(element: HTMLElement, excludeCode = false, layer?: ReadingLayer) {
+  if (element.closest(excluded) || outsideReadingDialog(element, layer) || element.closest(formulaSelector) || (excludeCode && element.closest(codeTextSelector))) return false;
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     const style = getComputedStyle(ancestor);
     if (!visible(ancestor, style) || excludeCode && isCodeBlock(ancestor, style)) return false;
@@ -638,11 +645,11 @@ function listColumnCount(source: HTMLElement) {
   return maximum > 1 ? maximum : undefined;
 }
 
-function placeholderFor(element: HTMLElement): ImagePlaceholder | undefined {
+function placeholderFor(element: HTMLElement, layer?: ReadingLayer): ImagePlaceholder | undefined {
   const image = element instanceof HTMLImageElement ? element :
     element.firstElementChild && element.matches('a,p,picture') &&
     !element.textContent?.trim() && element.querySelector('img');
-  if (!image || !visibleContext(image)) return undefined;
+  if (!image || !visibleContext(image, false, layer)) return undefined;
   const { width, height } = image.getBoundingClientRect();
   if (width < 48 || height < 32 || !image.closest('figure') && width < 96) return undefined;
   return { tag: 'image', alt: image.alt, width: Math.round(width), height: Math.round(height) };

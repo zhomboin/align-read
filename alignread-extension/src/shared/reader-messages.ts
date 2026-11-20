@@ -60,6 +60,8 @@ export const errors = {
   'not-configured': '请在设置中填写当前翻译服务的凭据。',
   'consent-required': '请在设置中确认文本外发并授予翻译服务访问权限。',
   'narrow': '窗口过窄，请扩大到至少 960 像素。',
+  'reading-view-unavailable': '无法读取这个阅读窗口中的正文。请返回文章网页，再开启翻译。',
+  'reading-view-changed': '阅读视图已切换，请在当前视图重新开启翻译。',
   'layout-start': '网页布局检查未通过，已恢复原网页。本次尚未发送网页文本进行翻译。',
   'incompatible': '双栏布局已失效，已恢复原网页。',
   'no-text': '未找到可翻译的可见文本。',

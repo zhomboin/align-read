@@ -1,13 +1,13 @@
 import type { Article } from '../extraction/document';
 
-const mainSelector = 'main,article,[role=main]';
+const readingContainers = 'main,article,[role=main],dialog[open],[role=dialog],[data-reading-mode]';
 const pageChrome = 'header,nav,aside,footer,[role=banner],[role=navigation],[role=complementary],[role=contentinfo]';
 const extensionUi = '[data-alignread-host],[data-alignread-selection]';
 const ignored = 'script,style,noscript,template,iframe,canvas,svg,form,input,textarea,select,option';
 const attributes = [
   'aria-current', 'aria-hidden', 'aria-selected', 'aria-orientation', 'class', 'contenteditable', 'data-state',
   'hidden', 'inert', 'href', 'id', 'open', 'role', 'style', 'dir', 'start', 'reversed', 'value', 'colspan', 'rowspan', 'scope',
-  'alt', 'src', 'width', 'height', 'data-ad-slot',
+  'data-reading-mode', 'aria-label', 'aria-labelledby', 'alt', 'src', 'width', 'height', 'data-ad-slot',
 ];
 const fittedStyles = new Set([
   'min-width', 'max-width', 'width', 'box-sizing', 'padding-left', 'padding-right', 'left', 'right',
@@ -31,7 +31,7 @@ export function watchSourceChanges(
     if (current?.isConnected && !current.contains(element) && !element.contains(current)) {
       const candidates = record.type === 'attributes' ? [element] : Array.from(record.addedNodes);
       if (!candidates.some((node) => node instanceof Element &&
-          (node.matches(mainSelector) || node.querySelector(mainSelector)))) return false;
+        (node.matches(readingContainers) || node.querySelector(readingContainers)))) return false;
     }
     if (!replacement && record.attributeName === 'style' && element instanceof HTMLElement) {
       prior.cssText = record.oldValue ?? '';

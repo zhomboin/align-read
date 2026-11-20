@@ -8,6 +8,7 @@ import { readReaderPage } from '../../shared/reader-page';
 import { connectAlignment } from '../alignment/alignment';
 import { extractArticle, type Article, type Mark } from '../extraction/document';
 import { createSplit, MIN_WIDTH, viewportWidth } from '../layout/split';
+import { findReadingLayer, layerIsOpen, readingLayerChange } from '../layout/site-reading-view';
 import { focusReaderMode } from '../ui/reader-mode-controls';
 import { ReaderPanel } from '../ui/reader-panel';
 import css from '../ui/reader.css?inline';
@@ -38,6 +39,10 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   const initialPage = readReaderPage(location.href);
   if (session.pageUrl && (!initialPage || readReaderPage(session.pageUrl)?.key !== initialPage.key)) return failure('stale');
 
+  const readingView = findReadingLayer();
+  if (!readingView.ok) return readingView;
+  const layer = readingView.value;
+
   const lifecycle = new AbortController();
   let ratio = session.ratio;
   let sync = session.syncScroll;
@@ -67,7 +72,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let scroll: HTMLElement | null = null;
   let highlighted: HTMLElement | undefined;
   const targets = new Map<string, HTMLElement>();
-  const split = createSplit(() => ratio, layoutChanged);
+  const split = createSplit(() => ratio, layoutChanged, layer);
   const stylesheet = new CSSStyleSheet();
   stylesheet.replaceSync(css);
   split.shadow.adoptedStyleSheets = [stylesheet];
@@ -157,13 +162,14 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
 
   function checkPage(): boolean {
     if (lifecycle.signal.aborted) return false;
+    if (layer && !layerIsOpen(layer)) { close('reading-view-changed'); return false; }
     const page = readReaderPage(location.href);
     const nextKey = page?.key ?? location.href.split('#', 1)[0]!;
     const fragmentChanged = pageHash !== location.hash;
     pageHash = location.hash;
     if (nextKey === pageKey) {
       const restored = split.restoreContext();
-      const unavailable = split.sourceViewport !== document.body || !split.container.isConnected;
+      const unavailable = !split.hasContext() || !split.container.isConnected;
       if (fragmentChanged || restored || unavailable !== contextUnavailable) sourceChanged();
       contextUnavailable = unavailable;
       return true;
@@ -231,6 +237,8 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
     const controller = new AbortController();
     extraction = controller;
     try {
+      const viewError = readingLayerChange(layer);
+      if (viewError) { close(viewError); return; }
       split.restoreContext();
       if (!initialLayout) {
         const layoutError = split.checkGeometry();
@@ -247,7 +255,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       const result = await extractArticle(session.range, controller.signal, split.sidebar, (node) => {
         const previous = outgoing.get(node);
         return Boolean(previous && previous.key !== key && previous.text === node.data);
-      }, undefined, session.dualComments, session.dualComments || session.replaceComments);
+      }, undefined, session.dualComments, session.dualComments || session.replaceComments, layer);
       flushChanges();
       if (controller.signal.aborted || lifecycle.signal.aborted || current !== revision) return;
       if (!validSources(result)) { sourceChanged(); return; }

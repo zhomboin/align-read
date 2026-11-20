@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { focusReaderMode, ReplacementControls, type ReaderModeSwitch } from './reader-mode-controls';
 import css from './reader.css?inline';
 
-export function createReplacementToolbar() {
+export function createReplacementToolbar(layer?: HTMLElement) {
   const host = document.createElement('div');
   host.dataset.alignreadHost = 'replace';
   host.style.setProperty('all', 'initial', 'important');
@@ -13,6 +13,7 @@ export function createReplacementToolbar() {
     margin: '0', padding: '0', border: '0', visibility: 'visible', 'pointer-events': 'auto',
   })) host.style.setProperty(property, value, 'important');
 
+  if (layer) host.popover = 'manual';
   const shadow = host.attachShadow({ mode: 'closed' });
   const stylesheet = new CSSStyleSheet();
   stylesheet.replaceSync(css);
@@ -20,10 +21,11 @@ export function createReplacementToolbar() {
   const root = createRoot(shadow);
 
   function mount() {
-    const documentRoot = document.documentElement;
+    const documentRoot = layer ?? document.documentElement;
     if (host.parentElement !== documentRoot) {
       documentRoot.insertBefore(host, documentRoot.querySelector(':scope > [data-alignread-selection]'));
     }
+    if (layer && host.isConnected && !host.matches(':popover-open')) host.showPopover();
   }
 
   return {

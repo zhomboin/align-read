@@ -10,6 +10,7 @@ const {checkSettings} = require('./settings-check.cjs');
 const {aiResponse, checkAiWorker, checkNamedAiWorkers, timedStreams} = require('./ai-check.cjs');
 const {checkInlineRow} = require('./inline-row-check.cjs');
 const {checkHeaderLayout} = require('./header-layout-check.cjs');
+const { checkSiteReadingView } = require('./site-reading-view-check.cjs');
 const {checkRepositoryLayout} = require('./repository-layout-check.cjs');
 const {checkAiPresets} = require('./ai-presets-check.cjs');
 const {checkSpaBrowser, checkSpaWorker, spaFixturePath} = require('./spa-check.cjs');
@@ -743,6 +744,7 @@ async function checkBrowser() {
     await checkHeaderLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
     await checkPaper({evaluate, until, replaceFixture, readerState});
     await checkRepositoryLayout({evaluate, until, page, replaceFixture, startLayout, readerState});
+    await checkSiteReadingView({ evaluate, until, page, replaceFixture, startLayout, readerState });
 
     await replaceFixture(fixture.replace('</article>',
       '<form><input type="password" value="fixture-password"><textarea>fixture-textarea</textarea></form></article>'));

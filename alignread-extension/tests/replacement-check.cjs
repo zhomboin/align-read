@@ -279,6 +279,7 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await require('./paper-check.cjs').checkPaper({evaluate, until, mode:'replace', readerState:() => command('state'),
     replaceFixture: html => evaluate('document.body.innerHTML = ' + JSON.stringify(html))});
   await require('./mode-reuse-check.cjs').checkModeReuse({evaluate, until});
+  await require('./site-reading-view-check.cjs').checkSiteReadingReplacement({ evaluate, until });
   await checkProgressBrowser({ page, evaluate, until });
   console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
