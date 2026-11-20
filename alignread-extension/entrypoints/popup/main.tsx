@@ -8,8 +8,7 @@ import {
   TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
   type ErrorCode, type PageState, type ProviderId, type ReaderControl, type ReaderMode, type ReadingOptions, type ReaderState,
 } from '../../src/shared/reader-messages';
-import { READER_MODE_OPTIONS } from '../../src/shared/reader-mode-options';
-import { SegmentedControl } from '../../src/shared/segmented-control';
+import { ReaderModeSelector } from '../../src/shared/reader-mode-selector';
 import '../../src/shared/settings-controls.css';
 import './popup.css';
 
@@ -142,8 +141,7 @@ function Popup() {
       </select>
     </label>}
     <LanguageFields value={choice} change={setChoice} locked={pending || Boolean(page?.error)} />
-    <SegmentedControl label="翻译模式" className="mode-field" options={READER_MODE_OPTIONS} value={mode}
-      change={setModeChoice} disabled={pending || !page || Boolean(page.error)} />
+    <ReaderModeSelector className="mode-field" mode={mode} onChange={setModeChoice} disabled={pending || !page || Boolean(page.error)} />
     {page?.sensitive && <label className="check sensitive">
       <input type="checkbox" checked={confirmSensitive} disabled={pending}
         onChange={(event) => setConfirmedProvider(event.target.checked ? provider : undefined)} />

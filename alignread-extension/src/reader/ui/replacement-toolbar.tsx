@@ -1,3 +1,4 @@
+import type { ReaderState } from '../../shared/reader-messages';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { focusReaderMode, ReplacementControls, type ReaderModeSwitch } from './reader-mode-controls';
@@ -27,8 +28,8 @@ export function createReplacementToolbar() {
 
   return {
     mount,
-    render(modeSwitch: ReaderModeSwitch, close: () => void) {
-      flushSync(() => root.render(<ReplacementControls modeSwitch={modeSwitch} close={close} />));
+    render(state: ReaderState, modeSwitch: ReaderModeSwitch, close: () => void) {
+      flushSync(() => root.render(<ReplacementControls state={state} modeSwitch={modeSwitch} close={close} />));
     },
     focusMode: () => focusReaderMode(shadow),
     close() {

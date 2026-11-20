@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { moveModeSlider } = require('./reader-controls-check.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -126,7 +127,7 @@ async function checkRepositoryLayout({evaluate, until, page, replaceFixture, sta
   assert.deepEqual(await evaluate('readerPayloads'), []);
   assert.equal(await evaluate('pane.querySelector("article pre").innerText'), codeOnly);
   assert.equal(await evaluate('pane.querySelector(".toolbar .status").textContent'), '已显示原文');
-  await evaluate('pane.querySelector(".reader-mode-field input[value=replace]").click()');
+  await moveModeSlider(page, evaluate, 'pane.querySelector(".reader-mode-field input[type=range]")', 'replace');
   await until(() => evaluate('pane.querySelector(".mode-switch-error")?.textContent === "未找到可翻译的可见文本。"'));
   assert.equal((await readerState()).mode, 'dual');
   assert.equal(await evaluate('pane.querySelector("article pre").innerText'), codeOnly);

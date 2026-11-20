@@ -28,7 +28,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   });
   const identity = createArticleIdentity();
   const replacement = trackReplacementText();
-  const translation = createTranslation(session, lifecycle.signal, applyTranslations, inherited);
+  const translation = createTranslation(session, lifecycle.signal, updateReader, inherited);
   const outgoing = new WeakMap<Text, { key: string; text: string }>();
   const appliedBlocks = new Set<string>();
   let sourceBody = document.body;
@@ -66,7 +66,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   function renderToolbar() {
     if (closing) return;
     toolbar.mount();
-    toolbar.render(modeSwitch(), () => close());
+    toolbar.render(translation.state(), modeSwitch(), () => close());
   }
 
   function checkPage() {
@@ -102,6 +102,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     }
     page = next;
     sourceChanged();
+    if (viewChanged) renderToolbar();
     if (viewChanged && !started && !bodyChanged) waitForMutation = true;
     return true;
   }
@@ -159,7 +160,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
       articleRevision = current;
       appliedBlocks.clear();
       translation.replace(result.blocks, href);
-      applyTranslations();
+      updateReader();
       translation.run();
     } catch {
       if (!controller.signal.aborted && !closing) close('unavailable');
@@ -167,6 +168,11 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
       extraction = undefined;
       if (revision !== current) scheduleRefresh();
     }
+  }
+
+  function updateReader() {
+    applyTranslations();
+    renderToolbar();
   }
 
   function applyTranslations() {

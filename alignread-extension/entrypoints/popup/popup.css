@@ -1,3 +1,5 @@
+@import '../../src/shared/reader-mode-selector.css';
+
 body {
   inline-size: 440px;
   font-size: 14px;

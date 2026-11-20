@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { moveModeSlider, checkProgressBrowser } = require('./reader-controls-check.cjs');
 const path = require('node:path');
 
 const replacementFixturePath = '/replacement-fixture.html';
@@ -20,8 +21,8 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   await page('Emulation.setDeviceMetricsOverride', {width: 440, height: 800, deviceScaleFactor: 1, mobile: false});
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
 
-  const mode = '.mode-field';
   const range = '.translation-range-field';
+  const modeInput = 'document.querySelector(".mode-field input[type=range]")';
   const checked = (field) => `document.querySelector('${field} input[type="radio"]:checked')`;
   const pick = (field, value) => evaluate(`document.querySelector('${field} input[value="${value}"]').labels[0].click()`);
   const button = (label) => `Array.from(document.querySelectorAll('button')).find(node => node.textContent === ${JSON.stringify(label)})`;
@@ -29,17 +30,17 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   const click = (label) => evaluate(`${button(label)}.click()`);
 
   await shown('开启双栏');
-  assert.equal(await evaluate(`${checked(mode)}.value`), 'dual');
+  assert.equal(await evaluate(`${modeInput}.getAttribute('aria-valuetext')`), '双栏对照');
   assert.equal(await evaluate(`${checked(range)}.value`), 'visible');
   await click('开启选词翻译');
   await shown('关闭选词翻译');
   const selectionId = tab.selectionId;
   await pick(range, 'main');
-  await evaluate(`${checked(mode)}.focus()`);
+  await evaluate(`${modeInput}.focus()`);
   await page('Input.dispatchKeyEvent', {type: 'keyDown', ...arrowRight});
   await page('Input.dispatchKeyEvent', {type: 'keyUp', ...arrowRight});
-  assert(await evaluate(`${checked(mode)} === document.activeElement`));
-  assert.equal(await evaluate(`${checked(mode)}.value`), 'replace');
+  assert(await evaluate(`${modeInput} === document.activeElement`));
+  assert.equal(await evaluate(`${modeInput}.getAttribute('aria-valuetext')`), '原位翻译');
   await click('开启原位翻译');
   await shown('恢复原文');
   assert.equal(session[`reader:${tabId}`].session.mode, 'replace');
@@ -52,18 +53,18 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   await page('Page.reload');
   await shown('重试失败项');
   assert.equal(await evaluate(`${checked(range)}.value`), 'main');
-  assert.equal(await evaluate(`${checked(mode)}.value`), 'replace');
+  assert.equal(await evaluate(`${modeInput}.getAttribute('aria-valuetext')`), '原位翻译');
   await click('重试失败项');
   await until(() => tab.readerRetryMode === 'replace');
   await shown('重新翻译');
   assert.equal(tab.selectionId, selectionId);
-  await pick(mode, 'dual');
+  await moveModeSlider(page, evaluate, modeInput, 'dual', true);
   await click('切换为双栏');
   await shown('关闭双栏');
   assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
   assert.equal(session[`reader:${tabId}`].session.mode, 'dual');
   assert.equal(tab.selectionId, selectionId);
-  await pick(mode, 'replace');
+  await evaluate(`document.querySelector('.mode-field .mode-name:last-child').click()`);
   await click('切换为原位翻译');
   await shown('恢复原文');
   assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
@@ -155,11 +156,11 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   const setParagraph = (id, value) => evaluate(`document.getElementById(${JSON.stringify(id)}).firstChild.data = ${JSON.stringify(value)}`);
   const appendParagraph = (id, value) => evaluate(`document.querySelector('main').insertAdjacentHTML('beforeend',
     ${JSON.stringify(`<p id="${id}">${value}</p>`)})`);
-  const picker = (mode) => `readerControl('.reader-mode-field input[value="${mode}"]')`;
-  const switchMode = (mode) => evaluate(`${picker(mode)}.labels[0].click()`);
+  const picker = "readerControl('.reader-mode-field input[type=range]')";
+  const switchMode = (mode) => moveModeSlider(page, evaluate, picker, mode);
   const assertModeControls = async (mode) => {
     const variant = mode === 'replace' ? '.replacement-controls' : '.toolbar';
-    assert(await evaluate(`readerShadows().length === 1 && !!readerControl('${variant} .reader-mode-field input:checked[value="${mode}"]')`));
+    assert(await evaluate(`readerShadows().length === 1 && readerControl('${variant} .reader-mode-field input[type=range]')?.getAttribute('aria-valuetext') === '${mode === 'replace' ? '原位翻译' : '双栏对照'}'`));
   };
   const assertOriginalLayout = async () => assert(await evaluate(`
     getComputedStyle(document.body).position === 'static' && document.body.getBoundingClientRect().width > innerWidth * .9 &&
@@ -168,6 +169,8 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   assert((await start('replace')).ok);
   const partial = await state('partial');
   assert.equal(partial.failed, 1);
+  await until(() => evaluate(`readerControl('.status [role=status]')?.textContent === '部分翻译失败'`));
+  assert.match(await evaluate(`readerControl('.progress-count').textContent`), /失败 1$/);
   await assertOriginalLayout();
   await assertModeControls('replace');
   await switchMode('dual');
@@ -243,12 +246,12 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await state('ready', 'dual');
   await assertModeControls('dual');
   assert(await evaluate('checkOriginalNodes() && checkOriginalText()'));
-  assert(await evaluate(`readerShadows()[0].activeElement === ${picker('dual')}`));
+  assert(await evaluate(`readerShadows()[0].activeElement === ${picker}`));
   await page('Input.dispatchKeyEvent', {type: 'keyDown', ...arrowRight});
   await page('Input.dispatchKeyEvent', {type: 'keyUp', ...arrowRight});
   await state('ready');
   await assertModeControls('replace');
-  assert(await evaluate(`readerShadows()[0].activeElement === ${picker('replace')}`));
+  assert(await evaluate(`readerShadows()[0].activeElement === ${picker}`));
   await assertOriginalLayout();
   assert.equal(await content('#mixed'), '  译 Read 译 the guide 译 with 译 care 译 and loadItem("Inline code example").  ');
   const switches = await evaluate('replacementSwitches');
@@ -276,6 +279,7 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await require('./paper-check.cjs').checkPaper({evaluate, until, mode:'replace', readerState:() => command('state'),
     replaceFixture: html => evaluate('document.body.innerHTML = ' + JSON.stringify(html))});
   await require('./mode-reuse-check.cjs').checkModeReuse({evaluate, until});
+  await checkProgressBrowser({ page, evaluate, until });
   console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
 
