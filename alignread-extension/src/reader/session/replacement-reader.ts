@@ -10,11 +10,12 @@ import { createModeSwitch } from './mode-switch';
 import type { ActiveReader } from './reader';
 import { trackReplacementText } from './replacement-text';
 import { routeText, watchSourceChanges } from './source-changes';
-import { createTranslation } from './translation';
+import { createTranslation, type ModeTranslations } from './translation';
 
 const refreshDelay = 80;
 
-export function startReplacementReader(session: Session, afterClose: (error?: ErrorCode) => void): Result<ActiveReader> {
+export function startReplacementReader(session: Session, afterClose: (error?: ErrorCode) => void,
+  inherited?: ModeTranslations): Result<ActiveReader> {
   const initialPage = readReaderPage(location.href);
   if (!document.body || !initialPage) return failure('unsupported-page');
   const { key: initialKey, origin } = initialPage;
@@ -27,7 +28,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   });
   const identity = createArticleIdentity();
   const replacement = trackReplacementText();
-  const translation = createTranslation(session, lifecycle.signal, applyTranslations);
+  const translation = createTranslation(session, lifecycle.signal, applyTranslations, inherited);
   const outgoing = new WeakMap<Text, { key: string; text: string }>();
   const appliedBlocks = new Set<string>();
   let sourceBody = document.body;
@@ -201,6 +202,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   renderToolbar();
   scheduleRefresh(0);
   return success({
+    translationsForMode: translation.translationsForMode,
     id: session.id, state: translation.state, close: () => close(),
     pause: translation.pause, resume: translation.resume, retry: translation.retry, clearCache: translation.clearCache,
     focusMode: toolbar.focusMode,

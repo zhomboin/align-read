@@ -14,11 +14,12 @@ import css from '../ui/reader.css?inline';
 import { createArticleIdentity } from './article-identity';
 import { createModeSwitch } from './mode-switch';
 import { routeText, watchSourceChanges } from './source-changes';
-import { createTranslation } from './translation';
+import { createTranslation, type ModeTranslations } from './translation';
 
 export type ActiveReader = {
   id: string; state: () => ReaderState; close: () => void;
   pause: () => void; resume: () => void; clearCache: (disable?: boolean) => void;
+  translationsForMode: (next: Session) => ModeTranslations | undefined;
   focusMode: () => void;
   retry?: () => void;
 };
@@ -29,7 +30,8 @@ const codeMarks = new Set<Mark>(['code', 'kbd', 'samp']);
 
 let dismissNotice: (() => void) | undefined;
 
-export function startReader(session: Session, afterClose: (error?: ErrorCode) => void): Result<ActiveReader> {
+export function startReader(session: Session, afterClose: (error?: ErrorCode) => void,
+  inherited?: ModeTranslations): Result<ActiveReader> {
   dismissNotice?.();
   if (viewportWidth() < MIN_WIDTH) return failure('narrow');
   if (!document.body) return failure('unsupported-page');
@@ -46,7 +48,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       pieces.some((piece) => piece.comment ? session.replaceComments : piece.translate))) return 'no-text';
   });
   const identity = createArticleIdentity();
-  const translation = createTranslation(session, lifecycle.signal, render);
+  const translation = createTranslation(session, lifecycle.signal, render, inherited);
   let alignment: ReturnType<typeof connectAlignment> | undefined;
   let alignmentLife: AbortController | undefined;
   let initialLayout = true;
@@ -291,6 +293,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   render();
   scheduleRefresh(0);
   return success({
+    translationsForMode: translation.translationsForMode,
     id: session.id, state, close: () => close(), pause: translation.pause, resume: translation.resume,
     clearCache: translation.clearCache, focusMode: () => focusReaderMode(split.shadow),
   });

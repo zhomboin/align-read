@@ -105,6 +105,7 @@ function startWorker() {
           }
           if (tab.layoutFailure) return {ok: false, error: 'layout-start'};
           tab.readerSessionId = message.session.id;
+          tab.lastReaderCommand = message.type;
           tab.readerState = {status: 'preparing', total: 0, done: 0, failed: 0};
           if (message.session.mode) tab.readerState.mode = message.session.mode;
           return {ok: true, value: tab.readerState};

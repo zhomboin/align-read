@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { MIN_WIDTH, viewportWidth } from '../src/reader/layout/split';
+import type { ModeTranslations } from '../src/reader/session/translation';
 import type { ActiveReader } from '../src/reader/session/reader';
 import { failure, isRecord, success, type ReaderCommand, type ReaderState, type Session } from '../src/shared/reader-messages';
 import { readReaderPage } from '../src/shared/reader-page';
@@ -28,6 +29,7 @@ export default defineUnlistedScript(() => {
       ? (await import('../src/reader/session/replacement-reader')).startReplacementReader
       : (await import('../src/reader/session/reader')).startReader;
     if (command !== generation) return failure('stale');
+    let inherited: ModeTranslations | undefined;
     if (previousSessionId !== undefined) {
       const page = readReaderPage(location.href);
       if (active?.id !== previousSessionId || !page || page.key !== readReaderPage(session.pageUrl)?.key) {
@@ -35,16 +37,18 @@ export default defineUnlistedScript(() => {
       }
       if (!document.body) return failure('unsupported-page');
       if (mode === 'dual' && viewportWidth() < MIN_WIDTH) return failure('narrow');
+      inherited = active.translationsForMode(session);
       stop();
     }
     const started = start(session, (reason) => {
       if (active?.id !== session.id) return;
       active = undefined;
       lastState = reason ? { mode, status: 'error', done: 0, total: 0, failed: 0, error: reason } : null;
-    });
+    }, inherited);
     if (!started.ok) return failure(started.error);
     const reader = started.value;
-    active = { ...reader, state: () => ({ ...reader.state(), mode }) };
+    const { source, target, range } = session;
+    active = { ...reader, state: () => ({ ...reader.state(), mode, options: { source, target, range } }) };
     if (previousSessionId !== undefined) reader.focusMode();
     return success(active.state());
   }

@@ -1,20 +1,28 @@
+import { readReaderPage } from '../../shared/reader-page';
 import { splitText } from '../../shared/split-text';
 import { browser } from 'wxt/browser';
 import { LIMITS, failure, type BatchResult, type ErrorCode, type ReaderRequest, type ReaderState,
   type Result, type Session } from '../../shared/reader-messages';
 import type { Block } from '../extraction/document';
 
-type Part = { id: string; text: string; translated?: string; error?: ErrorCode };
+type Part = { id: string; text: string; translated?: string; reuseEpoch?: number; error?: ErrorCode };
 type Work = { block: Block; parts: Part[] };
 type Batch = {
   id: string; parts: Map<string, Part[]>; cacheEpoch: number; result?: Result<BatchResult> | null;
+};
+export type ModeTranslations = {
+  completed: Map<string, string>;
+  previous?: Map<string, string>;
 };
 export type BlockStatus = 'pending' | 'failed' | 'done';
 const pauseOn = new Set<ErrorCode>(['authentication', 'quota', 'unsupported-language', 'rate-limit', 'ai-endpoint',
   'consent-required', 'not-configured', 'sensitive-site', 'stale', 'unavailable', 'network', 'timeout', 'ai-connect-timeout']);
 let batchNumber = 0;
 
-export function createTranslation(session: Session, signal: AbortSignal, update: () => void) {
+export function createTranslation(session: Session, signal: AbortSignal, update: () => void,
+  inherited?: ModeTranslations) {
+  let otherMode = inherited?.completed;
+  let lastVisit = inherited?.previous;
   const work = new Map<string, Work>();
   const cache = new Map<string, string>();
   const activeParts = new Set<Part>();
@@ -26,9 +34,24 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   let held = true;
   let canceling = false;
   let timer = 0;
-  let pageUrl = '';
+  let pageUrl = session.pageUrl ?? '';
   let error: ErrorCode | undefined;
   let inFlight: Batch | undefined;
+
+  // A round trip can change fragment boundaries twice. Keep the last view of each
+  // mode so returning to a long article does not depend on the bounded recent cache.
+  function translationsForMode(next: Session) {
+    const page = readReaderPage(next.pageUrl);
+    if (!cacheEnabled || !next.cache || !page || page.sensitive || page.viewKey !== readReaderPage(pageUrl)?.viewKey ||
+        session.source !== next.source || session.target !== next.target) return;
+    const completed = new Map(lastVisit ?? cache);
+    for (const parts of texts.values()) {
+      for (const part of parts) {
+        if (part.reuseEpoch === cacheEpoch && part.translated !== undefined) completed.set(part.text, part.translated);
+      }
+    }
+    return { completed, previous: otherMode };
+  }
 
   function replace(blocks: Block[], url: string) {
     const previousTexts = texts;
@@ -42,8 +65,11 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
       if (session.source !== session.target) {
         for (const piece of block.pieces) {
           if (!piece.translate || !piece.text.trim()) continue;
-          const chunks = previousTexts.get(piece.id) ??
-            splitText(piece.text.trim()).map((text, index) => ({ id: piece.id + '-' + index, text }));
+          const chunks = previousTexts.get(piece.id) ?? splitText(piece.text.trim()).map((text, index): Part => {
+            const translated = lastVisit?.get(text) ?? otherMode?.get(text) ?? cache.get(text);
+            if (translated !== undefined) remember(text, translated);
+            return { id: piece.id + '-' + index, text, translated, reuseEpoch: translated === undefined ? undefined : cacheEpoch };
+          });
           for (const part of chunks) {
             parts.push(part);
             activeParts.add(part);
@@ -54,6 +80,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
       work.set(block.id, { block, parts });
     }
 
+    if (blocks.length) lastVisit = undefined;
     if (error && ![...activeParts].some((part) => part.error === error)) error = undefined;
     // A batch that still references retired text cannot hold up the newly visible view.
     if (inFlight && [...inFlight.parts.values()].some((parts) => parts.some((part) => !activeParts.has(part)))) {
@@ -108,6 +135,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
         const cached = cache.get(part.text);
         if (cached !== undefined) {
           part.translated = cached;
+          part.reuseEpoch = cacheEpoch;
           continue;
         }
         const same = batch.get(part.text);
@@ -177,7 +205,10 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
       const value = translated?.get(parts[0]!.id);
       for (const part of current) {
         if (value === undefined) part.error = reason;
-        else part.translated = value;
+        else {
+          part.translated = value;
+          if (cacheEnabled) part.reuseEpoch = batch.cacheEpoch;
+        }
       }
       if (value !== undefined && cacheEnabled && batch.cacheEpoch === cacheEpoch) remember(text, value);
     }
@@ -217,6 +248,8 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   }
 
   function clearCache(disable = false) {
+    otherMode = undefined;
+    lastVisit = undefined;
     cacheEpoch++;
     cache.clear();
     cacheBytes = 0;
@@ -259,7 +292,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   }, { once: true });
 
   return {
-    state, status, show, run, retry, hold, replace, refreshAddress, resetPage,
+    state, status, show, run, retry, hold, replace, refreshAddress, resetPage, translationsForMode,
     pause() { paused = true; update(); },
     resume() { if (error) retry(); else { paused = false; update(); run(); } },
     clearCache(disable = false) {

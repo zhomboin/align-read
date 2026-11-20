@@ -102,6 +102,7 @@ export type TaskStatus = 'preparing' | 'translating' | 'paused' | 'partial' | 'r
 export type ReaderState = {
   status: TaskStatus; done: number; total: number; failed: number; error?: ErrorCode; cacheBytes?: number;
   mode?: ReaderMode;
+  options?: ReadingOptions;
 };
 export type PageState = {
   settings: PublicSettings; reader: ReaderState | null; selectionEnabled: boolean;

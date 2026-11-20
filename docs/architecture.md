@@ -87,6 +87,8 @@ Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发�
 
 扩展在会话内存记录每个已改节点的原文和最后写入的译文。应用译文前检查节点仍在页面上、原文与提取时一致且仍可翻译。动态提取读取已改节点的原文，避免将译文再次送译。等待或失败的段落继续显示原文。 [文字替换记录](../alignread-extension/src/reader/session/replacement-text.ts)
 
+同页切换时，先按照当前服务、配置版本和语言方向校验，再将可复用的已完成译文交给新模式。新模式重新提取原文，按完整待译片段匹配；在途批次和原网页节点不跨会话传递。即使长文超过最近译文的缓存上限，两种模式各自最近显示的已完成片段仍可在往返切换时复用。这些译文只保存在本页内存中，清空或关闭缓存、切换页面及结束阅读时释放。
+
 关闭、切换模式或站内换页时先处理网站的文字更新，再恢复扩展仍控制的节点。切换路径或哈希路由会取消旧批次并清空缓存，新页面可继续翻译。识别为敏感的新页面会结束会话，需要重新确认。
 
 ## 4. 会话与消息协议
@@ -117,7 +119,7 @@ Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、
 - **契约。** `translateSegments(request, credentials, signal)` 接受带批次 ID、阅读选项及译文项 ID 的请求，以及服务凭据和取消信号。Provider 适配器校验并规范化返回值，遗漏、重复和未知 ID 不得错误回填。服务只支持按输入顺序返回时，以明确的服务契约为依据并核验返回数量与类型，异常批次不得盲配。外部请求从 Worker 发起，业务正文只发可翻译文本和必要语言参数，段落 ID 留在本地，服务协议确需关联标识时使用不含页面身份的临时标识。
 - **AI 请求。** 服务目录定义显示名称、默认模型和允许使用的接口地址。请求策略复用 Chat Completions 的请求和响应处理，可为指定模型调整推理或 JSON 参数、为流式服务接入专用解析器。 [服务目录](../alignread-extension/src/shared/ai-settings.ts) · [请求策略](../alignread-extension/src/background/translation/ai-strategies.ts)
 - **AI 响应。** DeepSeek 使用 JSON 输出模式。MiniMax、GLM 和 Kimi 使用流式响应。后台跳过推理内容，拼接译文片段后再校验。流式请求等待首次响应或连续无数据的时限为 27 秒，单次请求最多 90 秒。Worker 用批次内临时序号匹配译文，要求每个序号恰好出现一次且译文非空。修改当前服务的端点、模型或密钥后，重新开启双栏和选词。 [AI 适配器](../alignread-extension/src/background/translation/ai.ts) · [DeepSeek JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [MiniMax 流式响应](https://platform.minimax.io/docs/api-reference/text-openai-api#streaming-response)
-- **缓存。** Reader 在当前路径或哈希路由内按规范化待译文本复用结果，语言方向、Provider 和配置版本由会话绑定。缓存最多 750 项或约 256 KB，敏感页面跳过缓存。设置页可关闭、查看估算占用和清空。换到其他路径或哈希路由时清空缓存，旧批次无法写回。
+- **缓存。** Reader 在当前路径或哈希路由内按规范化待译文本复用结果，语言方向、Provider 和配置版本由会话绑定。最近译文缓存最多 750 项或约 256 KB，敏感页面跳过缓存。设置页可关闭、查看估算占用和清空。换到其他路径或哈希路由时清空缓存，旧批次无法写回。
 - **页面权限。** 基础权限采用 `activeTab`、`scripting`、`storage`，点击后只注入支持的顶层文档。站点禁用先于注入检查，受限页面显示不可用原因。
 - **外发权限。** Worker 每批次检查当前服务的授权和配置。Google、有道和官方 AI 预设使用固定 HTTPS 接口，MiniMax 的接口随所选站点变化，自定义 AI 使用用户填写的地址。保存并同意外发时仅申请对应主机的可选权限，与网页的临时访问权限独立。页面消息无法指定服务地址，请求不跟随重定向。页面 URL、Cookies、表单内容及 DOM 不进入外发请求。密钥保存在受信任的扩展存储中，设置摘要返回配置状态、公开字段及脱敏信息。 [Chrome 可选权限](https://developer.chrome.com/docs/extensions/reference/api/permissions)
 
