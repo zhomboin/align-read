@@ -57,7 +57,6 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
   signal.throwIfAborted();
   const content = document.createDocumentFragment();
   const rows = new Map<string, HTMLElement>();
-  const viewport = page.getViewport({ scale: 1 });
   for (const band of model.bands) {
     const group = document.createElement('div');
     if (band.split) {
@@ -69,13 +68,6 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
       for (const block of blocks) {
         const p = document.createElement('p');
         if (block.style) p.classList.add('pdf-' + block.style);
-        if (band.columns.length === 1 && blocks.length === 1 && block.style !== 'caption') {
-          const [left, bottom, right, top] = block.bounds;
-          const [start] = viewport.convertToViewportPoint(left, bottom);
-          const [end] = viewport.convertToViewportPoint(right, top);
-          if (Math.abs(start + end - viewport.width) < viewport.width * .1 &&
-            Math.abs(end - start) < viewport.width * .8) p.style.textAlign = 'center';
-        }
         if (block.keep && image) {
           if (block.graphic) p.className = 'pdf-figure';
           p.append(originalLine(image.canvas, block, page, image.scale));

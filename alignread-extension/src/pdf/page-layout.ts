@@ -1,7 +1,7 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfLine } from './page-content';
+import type { PdfLine, PlacedLine } from './page-content';
+import { groupEquations, hasProse } from './equations';
 
-type PlacedLine = PdfLine & { x: number; y: number; end: number; height: number };
 export type PdfBand = { columns: PdfLine[][]; split?: number };
 
 function gutter(placed: PlacedLine[], width: number) {
@@ -98,7 +98,12 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
       y: (y1 + y2) / 2, height: Math.max(1, Math.abs(y1 - y2))
     };
   }).sort((a, b) => a.y - b.y || a.x - b.x);
-  const placed = markStyles(positions, viewport.width, viewport.height);
+  const styled = markStyles(positions, viewport.width, viewport.height);
+  const prose = styled.filter(line => !line.graphic && !line.style && (!line.keep || hasProse(line.text)) &&
+    line.end - line.x >= Math.max(line.height * 3, viewport.width * .11));
+  const split = gutter(prose, viewport.width);
+  const cut = (split ?? 0) * viewport.width;
+  const placed = groupEquations(styled, cut);
 
   const rows: PlacedLine[][] = [];
   for (const line of placed) {
@@ -108,11 +113,11 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
     else rows.push([line]);
   }
   for (const row of rows) row.sort((a, b) => a.x - b.x);
-  const split = gutter(placed.filter(line => !line.graphic && !line.style), viewport.width);
   if (!split) return [{ columns: [paragraphs(rows.flat())] }];
 
-  const cut = split * viewport.width;
   const bands: PdfBand[] = [];
+  const heights = prose.map(line => line.height).sort((a, b) => a - b);
+  const lineHeight = heights[Math.floor(heights.length / 2)] ?? 12;
   let left: PlacedLine[] = [], right: PlacedLine[] = [];
   function flush() {
     if (left.length && right.length) bands.push({ columns: [paragraphs(left), paragraphs(right)], split });
@@ -122,7 +127,8 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
   let previous: PlacedLine | undefined;
   for (const row of rows) {
     const first = row[0]!;
-    if (previous && first.y - previous.y > Math.max(previous.height, first.height) * 2.3) flush();
+    const gap = previous ? first.y - previous.y - (first.height + previous.height) / 2 : 0;
+    if (gap > lineHeight * 1.3) flush();
     previous = first;
     if (row.some(line => line.x < cut && line.end > cut)) {
       flush();

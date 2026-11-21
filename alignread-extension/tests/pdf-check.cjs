@@ -110,6 +110,9 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await until(() => evaluate('document.querySelector("#status")?.textContent.includes("第 1 页已就绪")'));
     assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 5');
     assert(await evaluate('!document.querySelector("#original canvas") && !!document.querySelector("#lines canvas[aria-label=\\"x = 2\\"]")'));
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines canvas")].map(canvas => canvas.ariaLabel)'),
+      ['x = 2', 'Let a + b be positive', '公式 (1.1)', '1']);
+    assert(await evaluate('document.querySelector(".pdf-equation canvas").height > 60 && !document.querySelector("#lines .pdf-columns")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
     assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2);
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
@@ -134,6 +137,8 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('document.querySelector("#next").click()');
     await hasStatus('第 3 页翻译完成');
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-columns > div")].map(el => el.textContent)'), ['译 ' + left, '译 ' + right]);
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-columns > div")].map(el => el.querySelector(".pdf-equation canvas")?.ariaLabel)'),
+      ['公式 (2.1)', '公式 (2.2)']);
     assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("译 Article title")'));
     assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
     assert(await evaluate('(() => { const blocks = [...document.querySelectorAll("#lines p")]; const i = blocks.findIndex(block => block.matches(".pdf-figure")); return blocks[i + 1]?.textContent.includes("译 Figure 1"); })()'));
