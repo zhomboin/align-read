@@ -1,8 +1,9 @@
 import { browser } from 'wxt/browser';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { openDocument, type PdfInput } from '../../src/pdf/document';
-import { displayPage, readPage, type PageContent, type TranslationRow } from '../../src/pdf/show-page';
+import { displayPage, readPage, type PageContent } from '../../src/pdf/show-page';
 import { PdfTranslationQueue, pdfLookAhead } from '../../src/pdf/translation-queue';
+import { PdfContinuousView } from '../../src/pdf/continuous-view';
 import { request } from '../../src/shared/extension';
 import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import {
@@ -21,9 +22,8 @@ const cancel = find<HTMLButtonElement>('cancel');
 const source = find<HTMLSelectElement>('source');
 const target = find<HTMLSelectElement>('target');
 const status = find('status');
-const original = find('original');
-const lines = find('lines');
-const columns = document.querySelector<HTMLElement>('.columns')!;
+const viewport = find('viewer');
+const pages = find('pages');
 source.add(new Option('自动检测', 'auto'));
 for (const [key, label] of Object.entries(LANGUAGES)) {
   source.add(new Option(label, key));
@@ -33,18 +33,17 @@ target.value = 'zh-CN';
 
 let pdf: PDFDocumentProxy | undefined;
 let documentLife = new AbortController();
-let pageLife = new AbortController();
+let view: PdfContinuousView | undefined;
 let queue: PdfTranslationQueue | undefined;
-let number = 0;
 let hostname = '';
 let settings: PublicSettings | undefined;
-let model: PageContent | undefined;
-let rows = new Map<string, TranslationRow>();
 let settingsRequest = 0;
 const models = new Map<number, Promise<{ page: PDFPageProxy; content: PageContent }>>();
 let besideOriginal = false;
 
 function controls() {
+  const number = view?.page ?? 0;
+  const model = view?.current?.result?.model;
   prev.disabled = !pdf || number <= 1;
   next.disabled = !pdf || number >= pdf.numPages;
   input.disabled = !pdf;
@@ -59,28 +58,35 @@ function controls() {
 }
 
 function hasPendingPages() {
-  if (!pdf || !queue) return false;
+  if (!pdf || !queue || !view) return false;
+  const number = view.page;
   for (let page = number + 1; page <= Math.min(number + pdfLookAhead, pdf.numPages); page++) {
     if (!queue.result(page)?.complete) return true;
   }
   return false;
 }
 
-function updateTranslation() {
+function updateTranslation(showStatus = true) {
   controls();
-  if (!model) return;
-  const result = queue?.result(number);
-  for (const item of model.items) {
-    rows.get(item.id)?.(result?.values.get(item.id));
-  }
+  if (!view) return;
+  view.applyTranslations((page, id) => queue?.result(page)?.values.get(id));
+  if (!showStatus) return;
+  const number = view.page;
+  const model = view.current?.result?.model;
   const job = queue?.translatingPage;
-  const pageStatus = !model.items.length
-    ? model.hasText ? '本页仅显示原文。' : '本页没有可提取的文字，扫描件需要先做 OCR。'
-    : result?.complete ? '第 ' + number + ' 页翻译完成。'
-      : job === number ? '正在翻译第 ' + number + ' 页…' : '第 ' + number + ' 页已就绪。';
+  const result = queue?.result(number);
+  let pageStatus = '正在读取第 ' + number + ' 页…';
+  if (view.current?.failed) pageStatus = '无法读取第 ' + number + ' 页。';
+  if (model) {
+    pageStatus = !model.items.length
+      ? model.hasText ? '本页仅显示原文。' : '本页没有可提取的文字，扫描件需要先做 OCR。'
+      : result?.complete ? '第 ' + number + ' 页翻译完成。'
+        : job === number ? '正在翻译第 ' + number + ' 页…' : '第 ' + number + ' 页已就绪。';
+  }
   const error = queue?.error ? '第 ' + queue.failedPage + ' 页：' + queue.error : '';
-  status.textContent = pageStatus + (job !== undefined && job !== number ? ' 正在预译第 ' + job + ' 页…' : '') +
+  const message = pageStatus + (job !== undefined && job !== number ? ' 正在预译第 ' + job + ' 页…' : '') +
     (error ? ' ' + error : '');
+  if (status.textContent !== message) status.textContent = message;
 }
 
 async function readSettings(initial = false, credentialsChanged = false) {
@@ -103,7 +109,7 @@ function getModel(doc: PDFDocumentProxy, pageNumber: number) {
   if (cached) return cached;
   const entry = doc.getPage(pageNumber).then(async page => {
     const content = await readPage(page);
-    if (pdf === doc && number !== pageNumber) page.cleanup();
+    if (pdf === doc && !view?.hasMounted(pageNumber)) page.cleanup();
     return { page, content };
   }).catch(error => {
     if (models.get(pageNumber) === entry) models.delete(pageNumber);
@@ -111,56 +117,34 @@ function getModel(doc: PDFDocumentProxy, pageNumber: number) {
   });
   models.set(pageNumber, entry);
   if (models.size > 12) {
-    const oldest = [...models.keys()].find(key => key !== number);
+    const oldest = [...models.keys()].find(key => key !== view?.page);
     if (oldest !== undefined) models.delete(oldest);
   }
   return entry;
 }
 
-async function showPage(value: number) {
-  if (!pdf) return;
-  pageLife.abort();
-  pageLife = new AbortController();
-  const signal = pageLife.signal;
-  const doc = pdf;
-  number = Math.max(1, Math.min(doc.numPages, Math.trunc(value) || 1));
-  input.value = String(number);
-  model = undefined;
-  rows.clear();
-  original.replaceChildren();
-  lines.replaceChildren();
-  controls();
-  status.textContent = '正在读取第 ' + number + ' 页…';
-  queue?.select(number);
+function goToPage(value: number) {
+  view?.goTo(value);
+  if (view) input.value = String(view.page);
+}
+
+async function renderPage(doc: PDFDocumentProxy, number: number, signal: AbortSignal, beside: boolean) {
+  const { page, content } = await getModel(doc, number);
+  signal.throwIfAborted();
   try {
-    const { page, content } = await getModel(doc, number);
-    if (signal.aborted) return;
-    try {
-      const display = await displayPage(page, content, signal, !besideOriginal);
-      if (signal.aborted) return;
-      if (display.canvas) original.replaceChildren(display.canvas);
-      lines.replaceChildren(display.content);
-      rows = display.rows;
-      model = content;
-      updateTranslation();
-    } finally { if (!signal.aborted) page.cleanup(); }
-  } catch {
-    if (!signal.aborted) status.textContent = '无法读取本页，请尝试其他页或重新选择文件。';
-  } finally { if (!signal.aborted) controls(); }
+    return { ...await displayPage(page, content, signal, !beside), model: content };
+  } finally { page.cleanup(); }
 }
 
 function clearDocument() {
   documentLife.abort();
-  pageLife.abort();
+  view?.dispose();
+  view = undefined;
   pdf = undefined;
-  model = undefined;
-  rows.clear();
   models.clear();
   queue?.stop();
   queue = undefined;
-  columns.hidden = true;
-  original.replaceChildren();
-  lines.replaceChildren();
+  viewport.hidden = true;
   find('total').textContent = '';
 }
 
@@ -169,7 +153,7 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
   documentLife = new AbortController();
   const signal = documentLife.signal;
   besideOriginal = beside;
-  columns.classList.toggle('beside-original', beside);
+  viewport.classList.toggle('beside-original', beside);
   hostname = inputFile instanceof URL ? inputFile.hostname : '';
   status.textContent = '正在打开 PDF…';
   try {
@@ -183,8 +167,14 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
     queue = new PdfTranslationQueue(doc.numPages, async page => (await getModel(doc, page)).content.items, updateTranslation);
     input.max = String(doc.numPages);
     find('total').textContent = '/ ' + doc.numPages;
-    columns.hidden = false;
-    await showPage(startPage);
+    viewport.hidden = false;
+    view = new PdfContinuousView(viewport, pages, doc.numPages,
+      (page, signal) => renderPage(doc, page, signal, beside),
+      page => {
+        if (document.activeElement !== input) input.value = String(page);
+        queue?.select(page);
+      }, page => updateTranslation(page === view?.page));
+    goToPage(startPage);
   } catch (error) {
     if (!signal.aborted) status.textContent = error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
       ? error.message : '无法打开 PDF。请确认文件完整，网页文件可下载后重新选择。';
@@ -206,9 +196,10 @@ translate.onclick = () => {
 };
 cancel.onclick = () => { queue?.stop(); status.textContent = '已停止翻译。'; };
 source.onchange = target.onchange = () => { queue?.reset(); status.textContent = '语言已更新。'; };
-prev.onclick = () => void showPage(number - 1);
-next.onclick = () => void showPage(number + 1);
-input.onchange = () => void showPage(input.valueAsNumber);
+prev.onclick = () => { if (view) goToPage(view.page - 1); };
+next.onclick = () => { if (view) goToPage(view.page + 1); };
+input.onchange = () => goToPage(input.valueAsNumber);
+input.onblur = () => { if (view) input.value = String(view.page); };
 file.onchange = () => {
   const selected = file.files?.[0];
   file.value = '';
@@ -243,18 +234,22 @@ async function initialize() {
   if (settings?.disabledSites.some(site => url.hostname === site || url.hostname.endsWith('.' + site))) {
     status.textContent = errors['site-disabled']; return;
   }
-  const pageNumber = (address: URL) => Number(new URLSearchParams(address.hash.slice(1)).get('page')) || 1;
+  const pageNumber = (address: URL) => {
+    const page = Number(new URLSearchParams(address.hash.slice(1)).get('page'));
+    return Number.isInteger(page) && page > 0 ? page : undefined;
+  };
   browser.tabs.onUpdated.addListener((id, change) => {
     if (id !== tabId) return;
     const updated = pdfAddress(change.url, true);
     if (updated && updated.href.split('#')[0] === url.href.split('#')[0]) {
-      if (updated.hash && besideOriginal) void showPage(pageNumber(updated));
+      const page = pageNumber(updated);
+      if (page && besideOriginal) goToPage(page);
     } else if (change.url || change.status === 'loading') {
       clearDocument();
       status.textContent = '标签页已更新，请重新打开 PDF 翻译。';
       void browser.sidePanel.setOptions({ tabId, enabled: false }).catch(() => undefined);
     }
   });
-  void load(url, true, pageNumber(url));
+  void load(url, true, pageNumber(url) ?? 1);
 }
 void initialize();

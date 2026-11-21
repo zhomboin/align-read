@@ -10,6 +10,5 @@
 <label>原文 <select id="source"></select></label><label>译为 <select id="target"></select></label>
 <button id="translate" disabled>翻译并预译后两页</button><button id="cancel" hidden>停止翻译</button></div>
 <p id="status" role="status">请选择 PDF 文件。</p>
-<div class="columns" hidden><section><h2>原页</h2><div id="original"></div></section>
-<section><h2>译文</h2><div id="lines"></div></section></div></main>
+<section id="viewer" tabindex="0" aria-label="PDF 连续阅读" hidden><div id="pages"></div></section></main>
 <script type="module" src="./main.ts"></script></body></html>

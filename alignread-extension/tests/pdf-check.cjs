@@ -112,7 +112,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       catch { throw new Error('Expected ' + message + ', got ' + await evaluate('document.querySelector("#status")?.textContent')); }
     };
     const pageNumberAligned = (label, direction) => evaluate(`(() => {
-      const number = document.querySelector('.pdf-page-number');
+      const number = document.querySelector('.pdf-sheet[aria-current] .pdf-page-number');
       const ink = number?.querySelector('canvas');
       if (ink?.ariaLabel !== ${JSON.stringify(label)} || getComputedStyle(number).textAlign !== '${direction}') return false;
       const line = number.getBoundingClientRect();
@@ -121,6 +121,18 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       if ('${direction}' === 'right') return Math.abs(line.right - glyph.right) < 1;
       return Math.abs(line.left + line.right - glyph.left - glyph.right) < 2;
     })()`);
+    const wheelToward = async (number, lead = 0) => {
+      const location = await evaluate(`(() => {
+        const viewer = document.querySelector('#viewer');
+        const target = document.querySelector('.pdf-sheet[data-page="${number}"]');
+        const rect = viewer.getBoundingClientRect();
+        return {
+          x: rect.left + rect.width / 2, y: rect.top + rect.height / 2,
+          deltaY: target.offsetTop - viewer.scrollTop - viewer.clientHeight * ${lead}
+        };
+      })()`);
+      await page('Input.dispatchMouseEvent', { type: 'mouseWheel', ...location, deltaX: 0 });
+    };
     await navigate('/popup.html');
     await until(() => evaluate('window.panelOptions?.path === "pdf.html#9"'));
     await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "在此页对照翻译").click()');
@@ -128,20 +140,20 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await navigate('/pdf.html#9');
     await until(() => evaluate('document.querySelector("#status")?.textContent.includes("第 1 页已就绪")'));
     assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 5');
-    assert(await evaluate('!document.querySelector("#original canvas") && !!document.querySelector("#lines canvas[aria-label=\\"x = 2\\"]")'));
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines p > canvas")].map(canvas => canvas.ariaLabel)'),
+    assert(await evaluate('!document.querySelector(".pdf-original canvas") && !!document.querySelector(".pdf-sheet[aria-current] .pdf-translation canvas[aria-label=\\"x = 2\\"]")'));
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation p > canvas")].map(canvas => canvas.ariaLabel)'),
       ['x = 2', '公式 (1.1)', '1']);
     assert(await pageNumberAligned('1', 'center'));
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-inline-math")].map(node=>node.textContent || node.querySelector("canvas")?.ariaLabel)'),
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-inline-math")].map(node=>node.textContent || node.querySelector("canvas")?.ariaLabel)'),
       ['f(x)', '102', 'a + b', 'c + d']);
-    assert(await evaluate('document.querySelector(".pdf-equation canvas").height > 60 && !document.querySelector("#lines .pdf-columns")'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-equation canvas").height > 60 && !document.querySelector(".pdf-sheet[aria-current] .pdf-translation .pdf-columns")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
     assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2, JSON.stringify(ranges));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 1'));
     await evaluate('document.querySelector("#cancel").click(); window.pdfRelease(); window.pdfHold = false');
     await hasStatus('已停止');
-    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("译 ")')));
+    assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 ")')));
     await evaluate('window.pdfFail = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 2 && !document.querySelector("#translate").disabled'));
     await evaluate('document.querySelector("#translate").click()');
@@ -154,43 +166,55 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert.deepEqual(await evaluate('pdfBatches.map(b => b.map(i => i.text))'), [
       ...Array(3).fill(firstPage), ['2 Article title', left, right, '2.1 Closing note', caption],
     ]);
-    assert(await evaluate('document.querySelector("#lines").textContent.includes("译 Ordinary prose")'));
-    await evaluate('window.pdfHold = "Fourth page prose"; document.querySelector("#next").click()');
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 Ordinary prose")'));
+    await evaluate('window.pdfHold = "Fourth page prose"');
+    await until(() => evaluate('Boolean(document.querySelector(".pdf-sheet[data-page=\\"2\\"] .pdf-translation"))'));
+    await wheelToward(2, .42);
+    await until(() => evaluate(`(() => {
+      const viewer = document.querySelector('#viewer').getBoundingClientRect();
+      const one = document.querySelector('.pdf-sheet[data-page="1"]').getBoundingClientRect();
+      const two = document.querySelector('.pdf-sheet[data-page="2"]').getBoundingClientRect();
+      return one.bottom > viewer.top && two.top < viewer.bottom;
+    })()`));
+    assert.equal(await evaluate('document.querySelector("#page").value'), '1');
+    await wheelToward(2);
     await hasStatus('OCR');
-    assert(await evaluate('document.querySelector(".pdf-page-number") === null'));
+    assert.equal(await evaluate('document.querySelector("#page").value'), '2');
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-page-number") === null'));
     await hasStatus('正在预译第 4 页');
     await evaluate('document.querySelector("#next").click()');
     await hasStatus('第 3 页翻译完成');
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-columns > div")].map(el => el.textContent)'), ['译 ' + left, '译 ' + right]);
-    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-columns > div")].map(el => el.querySelector(".pdf-equation canvas")?.ariaLabel)'),
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-columns > div")].map(el => el.textContent)'), ['译 ' + left, '译 ' + right]);
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-columns > div")].map(el => el.querySelector(".pdf-equation canvas")?.ariaLabel)'),
       ['公式 (2.1)', '公式 (2.2)']);
-    assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("译 2 Article title")'));
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-section")].map(node => [node.tagName, node.textContent, getComputedStyle(node).fontWeight])'),
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation > div:first-child").textContent.includes("译 2 Article title")'));
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-section")].map(node => [node.tagName, node.textContent, getComputedStyle(node).fontWeight])'),
       [['H3', '译 2 Article title', '700'], ['H4', '译 2.1 Closing note', '700']]);
-    assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
-    assert(await evaluate('(() => { const blocks = [...document.querySelectorAll("#lines p")]; const i = blocks.findIndex(block => block.matches(".pdf-figure")); return blocks[i + 1]?.textContent.includes("译 Figure 1"); })()'));
-    assert(await evaluate('document.querySelector(".pdf-columns > div:nth-child(2)").getBoundingClientRect().left > document.querySelector(".pdf-columns > div").getBoundingClientRect().right'));
+    assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 1'));
+    assert(await evaluate('(() => { const blocks = [...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation p")]; const i = blocks.findIndex(block => block.matches(".pdf-figure")); return blocks[i + 1]?.textContent.includes("译 Figure 1"); })()'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-columns > div:nth-child(2)").getBoundingClientRect().left > document.querySelector(".pdf-sheet[aria-current] .pdf-columns > div").getBoundingClientRect().right'));
     await evaluate('document.querySelector("#page").value = "5"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 5 页翻译完成');
     assert(await pageNumberAligned('v', 'right'));
-    await evaluate('window.pdfRelease(); document.querySelector("#page").value = "1"; document.querySelector("#page").dispatchEvent(new Event("change"))');
+    await evaluate('window.pdfRelease()');
+    await wheelToward(1);
     await hasStatus('第 1 页翻译完成');
     assert.equal(await evaluate('pdfBatches.length'), 6);
     await evaluate('document.querySelector("#target").value = "ja"; document.querySelector("#target").dispatchEvent(new Event("change"))');
     await hasStatus('语言已更新');
-    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("译 ")')));
+    assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 ")')));
     assert.equal(await evaluate('pdfBatches.length'), 6);
     await evaluate('window.pdfHold = false; document.querySelector("#page").value = "4"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 4 页已就绪');
     assert(await pageNumberAligned('4', 'left'));
-    assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
-    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("Labels inside the table")')));
+    assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 1'));
+    assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("Labels inside the table")')));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 7'));
     assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), ['Fourth page prose']);
     await evaluate('tabUpdated(9, { status: "loading" }); window.pdfRelease()');
     await hasStatus('标签页已更新');
-    assert(await evaluate('document.querySelector(".columns").hidden && window.panelOptions.enabled === false'));
+    assert(await evaluate('document.querySelector("#viewer").hidden && window.panelOptions.enabled === false'));
     await navigate('/pdf.html?local=deny#9');
     await hasStatus('允许访问文件网址');
     assert.equal(await evaluate('Boolean(window.fileRead)'), false);
@@ -201,15 +225,15 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await hasStatus('第 1 页已就绪');
     await evaluate('document.querySelector("#translate").click()');
     await hasStatus('第 1 页翻译完成');
-    assert(await evaluate('document.querySelector("#lines").textContent.replace(/\\s+/g, " ").includes("译 Let a + b 译 and c + d 译 be positive")'));
-    assert(await evaluate('document.querySelector("#lines .pdf-inline-math sup")?.textContent === "2" && !document.querySelector("#lines").textContent.includes("ARF")'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.replace(/\\s+/g, " ").includes("译 Let a + b 译 and c + d 译 be positive")'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation .pdf-inline-math sup")?.textContent === "2" && !document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("ARF")'));
     assert.deepEqual(await evaluate('pdfBatches[1].map(item => item.text.trim())'),
       ['function', 'is smooth on this interval.', 'The result is', 'with modest error.', 'Let', 'and', 'be positive']);
     await navigate('/pdf.html?reorder=1#9');
     await hasStatus('第 1 页已就绪');
     await evaluate('document.querySelector("#translate").click()');
     await hasStatus('第 1 页翻译完成');
-    assert(await evaluate('document.querySelector("#lines").textContent.includes("译 先 c + d，再 a + b")'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 先 c + d，再 a + b")'));
     await navigate('/pdf.html?path=/bad.pdf#9');
     await hasStatus('分段读取失败');
     await navigate('/pdf.html?path=/whole.pdf#9');
@@ -224,8 +248,8 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       file.dispatchEvent(new Event('change'));
     })()`);
     await hasStatus('第 1 页已就绪');
-    assert(await evaluate('!!document.querySelector("#original canvas")'));
-    console.log('PDF opening, range reads, column order, whole figures, prefetch, cancellation and retry passed.');
+    assert(await evaluate('!!document.querySelector(".pdf-original canvas")'));
+    console.log('PDF opening, range reads, continuous wheel navigation, column order, figures, prefetch, cancellation and retry passed.');
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
