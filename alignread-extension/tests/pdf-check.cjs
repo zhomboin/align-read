@@ -22,6 +22,19 @@ function mockViewer(origin) {
   if (location.pathname !== '/pdf.html') return;
   window.pdfBatches = [];
   const params = new URLSearchParams(location.search);
+  if (params.has('cancel-retry')) {
+    const schedule = window.setTimeout.bind(window);
+    const cancel = window.clearTimeout.bind(window);
+    window.setTimeout = (fn, delay, ...args) => {
+      if (delay !== 250) return schedule(fn, delay, ...args);
+      window.pdfRetryTimer = schedule(fn, 60000, ...args);
+      return window.pdfRetryTimer;
+    };
+    window.clearTimeout = timer => {
+      if (timer === window.pdfRetryTimer) window.pdfRetryCancelled = true;
+      cancel(timer);
+    };
+  }
   const fileUrl = 'file:///fixture.pdf';
   const fixtureUrl = location.origin + (params.get('path') || '/fixture.pdf');
   const sourceUrl = fixtureUrl + (params.has('start') ? '#page=' + params.get('start') : '');
@@ -109,10 +122,14 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
   const pdf = Buffer.from(fixturePdf());
   const ranges = [];
   const fullReads = new Map();
+  const rangeReads = new Map();
+  const attemptsFor = route => Array.from(rangeReads.entries())
+    .filter(([key]) => key.startsWith(route + ':')).map(([, count]) => count);
   const server = http.createServer(async (req, res) => {
     try {
       const route = new URL(req.url, 'http://localhost').pathname;
-      if (['/fixture.pdf', '/bad.pdf', '/range-rejected.pdf', '/unreadable.pdf'].includes(route)) {
+      if (['/fixture.pdf', '/bad.pdf', '/range-rejected.pdf', '/unreadable.pdf',
+        '/retry-first.pdf', '/retry-segment.pdf', '/cancel-retry.pdf'].includes(route)) {
         const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '');
         if (!range) {
           fullReads.set(route, (fullReads.get(route) ?? 0) + 1);
@@ -120,16 +137,25 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
           else res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(pdf);
           return;
         }
+        const key = route + ':' + range[0];
+        const attempt = (rangeReads.get(key) ?? 0) + 1;
+        rangeReads.set(key, attempt);
         if (route === '/range-rejected.pdf') {
           res.writeHead(416, { 'Content-Range': 'bytes */' + pdf.length }).end();
+          return;
+        }
+        if (route === '/cancel-retry.pdf' || (route === '/retry-first.pdf' && range[1] === '0' && attempt < 4)) {
+          res.writeHead(503).end();
           return;
         }
         const start = Number(range[1]), end = Math.min(pdf.length - 1, Number(range[2]));
         ranges.push([start, end]);
         const body = pdf.subarray(start, end + 1);
+        const badRange = start && (['/bad.pdf', '/unreadable.pdf'].includes(route) ||
+          (route === '/retry-segment.pdf' && attempt < 4));
         res.writeHead(206, {
           'Content-Type': 'application/pdf',
-          'Content-Range': 'bytes ' + (['/bad.pdf', '/unreadable.pdf'].includes(route) && start ? 0 : start) + '-' + end + '/' + pdf.length,
+          'Content-Range': 'bytes ' + (badRange ? 0 : start) + '-' + end + '/' + pdf.length,
           'Content-Length': body.length,
         }).end(body);
         return;
@@ -381,17 +407,33 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('window.pdfEcho = false; document.querySelector("#translate").click()');
     await hasStatus('第 1 页翻译完成');
     assert.deepEqual(await evaluate('pdfBatches[1].map(item => item.text)'), ['Research for AI + Science remains useful.']);
+    for (const route of ['/retry-first.pdf', '/retry-segment.pdf']) {
+      await navigate('/pdf.html?path=' + route + '&start=4#9');
+      await hasStatus('第 4 页已就绪');
+      assert.equal(Math.max(...attemptsFor(route)), 4);
+      assert.equal(fullReads.get(route), undefined);
+    }
     await navigate('/pdf.html?path=/bad.pdf&start=4#9');
     await hasStatus('第 4 页已就绪');
+    assert.equal(Math.max(...attemptsFor('/bad.pdf')), 4);
     assert.equal(fullReads.get('/bad.pdf'), 1);
     assert.equal(await evaluate('document.querySelector("#page").value'), '4');
     await navigate('/pdf.html?path=/unreadable.pdf#9');
     await hasStatus('分段读取和完整读取均失败');
+    assert.equal(Math.max(...attemptsFor('/unreadable.pdf')), 4);
     assert.equal(fullReads.get('/unreadable.pdf'), 1);
+    await navigate('/pdf.html?path=/cancel-retry.pdf&cancel-retry=1#9');
+    await until(() => evaluate('Boolean(window.pdfRetryTimer)'));
+    await evaluate('updatePdfTab({ url: location.origin + "/different.html", status: "loading" })');
+    await hasStatus('标签页已更新');
+    assert(await evaluate('window.pdfRetryCancelled === true'));
+    assert.deepEqual(attemptsFor('/cancel-retry.pdf'), [1]);
+    assert.equal(fullReads.get('/cancel-retry.pdf'), undefined);
     await navigate('/pdf.html?path=/whole.pdf#9');
     await hasStatus('第 1 页已就绪');
     await navigate('/pdf.html?path=/range-rejected.pdf#9');
     await hasStatus('第 1 页已就绪');
+    assert.deepEqual(attemptsFor('/range-rejected.pdf'), [4]);
     assert.equal(fullReads.get('/range-rejected.pdf'), 1);
     for (const suffix of ['', '?pending=1#9']) {
       await navigate('/pdf.html' + suffix);
