@@ -44,15 +44,22 @@ function mockViewer(origin) {
       providers: { google: { configured: true, consent: true, hostPermission: true } }
     }
   });
+  chrome.storage = { onChanged: { addListener(callback) { window.pdfSettingsChanged = callback; } } };
   chrome.runtime.connect = () => {
     let receive;
     return {
-      onDisconnect: { addListener() { } }, onMessage: { addListener(fn) { receive = fn; } }, disconnect() { },
+      onDisconnect: { addListener() { } },
+      onMessage: { addListener(fn) { receive = fn; } },
+      disconnect() { window.pdfDisconnects = (window.pdfDisconnects ?? 0) + 1; },
       postMessage({ id, items }) {
         pdfBatches.push(items);
-        if (window.pdfHold) return;
+        const batch = { ok: true, value: { id, items: items.map(item => ({ id: item.id, text: '译 ' + item.text })) } };
+        if (window.pdfHold === true || items.some(item => item.text === window.pdfHold)) {
+          window.pdfRelease = () => receive(batch);
+          return;
+        }
         if (window.pdfFail) { window.pdfFail = false; receive({ ok: false, error: 'network' }); return; }
-        receive({ ok: true, value: { id, items: items.map(item => ({ id: item.id, text: '译 ' + item.text })) } });
+        receive(batch);
       }
     };
   };
@@ -101,36 +108,53 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert.deepEqual(await evaluate('window.panelOpened'), { tabId: 9 });
     await navigate('/pdf.html#9');
     await until(() => evaluate('document.querySelector("#status")?.textContent.includes("第 1 页已就绪")'));
-    assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 3');
+    assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 5');
     assert(await evaluate('!document.querySelector("#original canvas") && !!document.querySelector("#lines canvas[aria-label=\\"x = 2\\"]")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
     assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2);
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 1'));
-    await evaluate('document.querySelector("#cancel").click(); window.pdfHold = false; window.pdfFail = true; document.querySelector("#translate").click()');
+    await evaluate('document.querySelector("#cancel").click(); window.pdfRelease(); window.pdfHold = false');
+    await hasStatus('已停止');
+    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("译 ")')));
+    await evaluate('window.pdfFail = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 2 && !document.querySelector("#translate").disabled'));
     await evaluate('document.querySelector("#translate").click()');
-    await until(() => evaluate('document.querySelector("#status").textContent.includes("完成")'));
-    assert.deepEqual(await evaluate('pdfBatches.map(b=>b.map(i=>i.text))'), Array(3).fill(['Ordinary prose']));
-    assert(await evaluate('document.querySelector("#lines").textContent.includes("译 Ordinary prose")'));
-    await evaluate('document.querySelector("#next").click()');
-    await until(() => evaluate('document.querySelector("#status").textContent.includes("OCR")'));
-    assert(await evaluate('document.querySelector("#translate").disabled && pdfBatches.length === 3'));
-    await evaluate('document.querySelector("#prev").click()');
-    await until(() => evaluate('document.querySelector("#status").textContent.includes("第 1 页已就绪")'));
-    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("译 ")')));
-    await evaluate('document.querySelector("#page").value = "3"; document.querySelector("#page").dispatchEvent(new Event("change"))');
-    await hasStatus('第 3 页已就绪');
     const left = 'Inside the left column continues here.';
     const right = 'Inside the right column finishes here.';
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-columns > div")].map(el => el.textContent)'), [left, right]);
-    assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("Article title")'));
-    assert(await evaluate('document.querySelector("#lines > div:last-child").textContent.includes("Closing note")'));
-    await evaluate('document.querySelector("#translate").click()');
-    await hasStatus('完成');
-    assert.deepEqual(await evaluate('pdfBatches.at(-1).map(item => item.text)'), ['Article title', left, right, 'Closing note']);
+    const caption = 'Figure 1: Comparison of both columns.';
+    await until(() => evaluate('pdfBatches.length === 4 && document.querySelector("#cancel").textContent === "停止预译"'));
+    assert.deepEqual(await evaluate('pdfBatches.map(b => b.map(i => i.text))'), [
+      ...Array(3).fill(['Ordinary prose']), ['Article title', left, right, 'Closing note', caption],
+    ]);
+    assert(await evaluate('document.querySelector("#lines").textContent.includes("译 Ordinary prose")'));
+    await evaluate('window.pdfHold = "Fourth page prose"; document.querySelector("#next").click()');
+    await hasStatus('OCR');
+    await hasStatus('正在预译第 4 页');
+    await evaluate('document.querySelector("#next").click()');
+    await hasStatus('第 3 页翻译完成');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-columns > div")].map(el => el.textContent)'), ['译 ' + left, '译 ' + right]);
+    assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("译 Article title")'));
+    assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
+    assert(await evaluate('(() => { const blocks = [...document.querySelectorAll("#lines p")]; const i = blocks.findIndex(block => block.matches(".pdf-figure")); return blocks[i + 1]?.textContent.includes("译 Figure 1"); })()'));
     assert(await evaluate('document.querySelector(".pdf-columns > div:nth-child(2)").getBoundingClientRect().left > document.querySelector(".pdf-columns > div").getBoundingClientRect().right'));
-    await evaluate('tabUpdated(9, { status: "loading" })');
+    await evaluate('document.querySelector("#page").value = "5"; document.querySelector("#page").dispatchEvent(new Event("change"))');
+    await hasStatus('第 5 页翻译完成');
+    await evaluate('window.pdfRelease(); document.querySelector("#page").value = "1"; document.querySelector("#page").dispatchEvent(new Event("change"))');
+    await hasStatus('第 1 页翻译完成');
+    assert.equal(await evaluate('pdfBatches.length'), 6);
+    await evaluate('document.querySelector("#target").value = "ja"; document.querySelector("#target").dispatchEvent(new Event("change"))');
+    await hasStatus('语言已更新');
+    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("译 ")')));
+    assert.equal(await evaluate('pdfBatches.length'), 6);
+    await evaluate('window.pdfHold = false; document.querySelector("#page").value = "4"; document.querySelector("#page").dispatchEvent(new Event("change"))');
+    await hasStatus('第 4 页已就绪');
+    assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
+    assert(!(await evaluate('document.querySelector("#lines").textContent.includes("Labels inside the table")')));
+    await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
+    await until(() => evaluate('pdfBatches.length === 7'));
+    assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), ['Fourth page prose']);
+    await evaluate('tabUpdated(9, { status: "loading" }); window.pdfRelease()');
     await hasStatus('标签页已更新');
     assert(await evaluate('document.querySelector(".columns").hidden && window.panelOptions.enabled === false'));
     await navigate('/pdf.html?local=deny#9');
@@ -154,7 +178,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     })()`);
     await hasStatus('第 1 页已就绪');
     assert(await evaluate('!!document.querySelector("#original canvas")'));
-    console.log('PDF panel, range and whole reads, local permissions, column ordering, math, cancellation and retry passed.');
+    console.log('PDF opening, range reads, column order, whole figures, prefetch, cancellation and retry passed.');
   } finally {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));

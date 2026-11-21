@@ -1,13 +1,20 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 
-export type PdfLine = { text: string; keep: boolean; bounds: [number, number, number, number]; };
+export type PdfBounds = [number, number, number, number];
+export type PdfLine = {
+  text: string; keep: boolean; bounds: PdfBounds;
+  graphic?: boolean;
+  style?: 'title' | 'heading' | 'byline' | 'caption';
+};
 const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)|mono|courier|cmtt/i;
 const mathText = /[\p{Sm}α-ωΑ-Ω\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
 const looksLikeCode = /[{}]|;\s*$|(?:=>|:=|\/\/|\/\*|\w+\([^)]*\)|\w+\s*[_^]\s*[\w{])|^\s*(?:#|def |class |import |return |const |let |function )/;
 
 export async function pageLines(page: PDFPageProxy) {
   const { items, styles } = await page.getTextContent();
+  const [leftEdge, , rightEdge] = page.view as PdfBounds;
+  const margin = (rightEdge - leftEdge) * .10;
   const lines: PdfLine[] = [];
   let current: TextItem[] = [];
   function flush() {
@@ -34,6 +41,13 @@ export async function pageLines(page: PDFPageProxy) {
   }
   for (const item of items) {
     if (!('str' in item)) continue;
+    // Rotated publishing marks at the sheet edge belong to the original page.
+    const x = item.transform[4];
+    if (Math.abs(item.transform[1]) > Math.abs(item.transform[0]) &&
+      (x < leftEdge + margin || x > rightEdge - margin)) {
+      flush();
+      continue;
+    }
     const last = current.at(-1);
     if (!item.str.trim() && item.width > Math.max(10, (last?.height ?? item.height) * 1.2)) {
       flush();
@@ -62,7 +76,8 @@ export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDF
   const crop = document.createElement('canvas');
   crop.width = width;
   crop.height = height;
-  crop.style.width = width / scale * 1.45 + 'px';
+  crop.style.width = width / scale * (line.graphic ? 1.7 : 1.45) + 'px';
+  if (line.graphic) crop.className = 'pdf-graphic';
   crop.setAttribute('role', 'img');
   crop.setAttribute('aria-label', line.text);
   crop.getContext('2d')!.drawImage(canvas, x, y, width, height, 0, 0, width, height);

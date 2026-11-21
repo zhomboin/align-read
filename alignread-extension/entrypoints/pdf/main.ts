@@ -1,12 +1,12 @@
 import { browser } from 'wxt/browser';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { openDocument, type PdfInput } from '../../src/pdf/document';
-import { displayPage, type TranslationRow } from '../../src/pdf/show-page';
-import { translatePage } from '../../src/pdf/translate';
+import { displayPage, readPage, type PageContent } from '../../src/pdf/show-page';
+import { PdfTranslationQueue, pdfLookAhead } from '../../src/pdf/translation-queue';
 import { request } from '../../src/shared/extension';
 import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import {
-  LANGUAGES, TRANSLATION_PROVIDERS, errors, selectedProviderAccess, type Language, type SourceLanguage,
+  LANGUAGES, TRANSLATION_PROVIDERS, errors, isRecord, selectedProviderAccess, type Language, type SourceLanguage,
   type PublicSettings
 } from '../../src/shared/reader-messages';
 import './pdf.css';
@@ -34,42 +34,89 @@ target.value = 'zh-CN';
 let pdf: PDFDocumentProxy | undefined;
 let documentLife = new AbortController();
 let pageLife = new AbortController();
-let translation: AbortController | undefined;
+let queue: PdfTranslationQueue | undefined;
 let number = 0;
 let hostname = '';
 let settings: PublicSettings | undefined;
-let rows: TranslationRow[] = [];
+let model: PageContent | undefined;
+let rows = new Map<string, HTMLElement>();
+let settingsRequest = 0;
+const models = new Map<number, Promise<{ page: PDFPageProxy; content: PageContent }>>();
 let besideOriginal = false;
 
 function controls() {
   prev.disabled = !pdf || number <= 1;
   next.disabled = !pdf || number >= pdf.numPages;
   input.disabled = !pdf;
-  translate.disabled = !settings || !rows.some(row => !row.done) || Boolean(translation);
-  cancel.hidden = !translation;
-  if (settings) translate.textContent = '用' + TRANSLATION_PROVIDERS[settings.provider].label + '翻译本页';
+  const job = queue?.translatingPage;
+  const canStart = model && (model.items.length > 0 || (pdf && number < pdf.numPages));
+  translate.disabled = !settings || !canStart || Boolean(queue?.enabled) ||
+    Boolean(queue?.result(number)?.complete && !queue.error && !hasPendingPages());
+  cancel.hidden = !queue?.enabled;
+  cancel.textContent = job ? '停止翻译' : '停止预译';
+  translate.textContent = queue?.error ? '重试翻译' : queue?.result(number) ? '继续翻译' : '翻译并预译后两页';
+  if (settings) translate.title = TRANSLATION_PROVIDERS[settings.provider].label;
 }
 
-async function readSettings(initial = false) {
+function hasPendingPages() {
+  if (!pdf || !queue) return false;
+  for (let page = number + 1; page <= Math.min(number + pdfLookAhead, pdf.numPages); page++) {
+    if (!queue.result(page)?.complete) return true;
+  }
+  return false;
+}
+
+function updateTranslation() {
+  controls();
+  if (!model) return;
+  const result = queue?.result(number);
+  for (const item of model.items) {
+    const node = rows.get(item.id);
+    const text = result?.values.get(item.id) ?? item.text;
+    if (node && node.textContent !== text) node.textContent = text;
+  }
+  const job = queue?.translatingPage;
+  const pageStatus = !model.items.length
+    ? model.hasText ? '本页仅显示原文。' : '本页没有可提取的文字，扫描件需要先做 OCR。'
+    : result?.complete ? '第 ' + number + ' 页翻译完成。'
+      : job === number ? '正在翻译第 ' + number + ' 页…' : '第 ' + number + ' 页已就绪。';
+  const error = queue?.error ? '第 ' + queue.failedPage + ' 页：' + queue.error : '';
+  status.textContent = pageStatus + (job !== undefined && job !== number ? ' 正在预译第 ' + job + ' 页…' : '') +
+    (error ? ' ' + error : '');
+}
+
+async function readSettings(initial = false, credentialsChanged = false) {
+  const sequence = ++settingsRequest;
   const result = await request<PublicSettings>({ type: 'settings' });
+  if (sequence !== settingsRequest) return;
   if (result.ok) {
-    if (settings && settings.provider !== result.value.provider) resetTranslation();
-    settings = result.value;
+    const next = result.value;
+    const reset = settings && (credentialsChanged || settings.provider !== next.provider || !selectedProviderAccess(next).authorized);
+    settings = next;
+    if (reset) queue?.reset();
+    if (next.disabledSites.some(site => hostname === site || hostname.endsWith('.' + site))) queue?.stop();
     if (initial) { source.value = settings.source; target.value = settings.target; }
   } else status.textContent = errors[result.error];
   controls();
 }
 
-function stopTranslation() {
-  translation?.abort();
-  translation = undefined;
-  controls();
-}
-
-function resetTranslation() {
-  stopTranslation();
-  for (const row of rows) { row.done = false; row.p.textContent = row.item.text; }
-  controls();
+function getModel(doc: PDFDocumentProxy, pageNumber: number) {
+  const cached = models.get(pageNumber);
+  if (cached) return cached;
+  const entry = doc.getPage(pageNumber).then(async page => {
+    const content = await readPage(page);
+    if (pdf === doc && number !== pageNumber) page.cleanup();
+    return { page, content };
+  }).catch(error => {
+    if (models.get(pageNumber) === entry) models.delete(pageNumber);
+    throw error;
+  });
+  models.set(pageNumber, entry);
+  if (models.size > 12) {
+    const oldest = [...models.keys()].find(key => key !== number);
+    if (oldest !== undefined) models.delete(oldest);
+  }
+  return entry;
 }
 
 async function showPage(value: number) {
@@ -78,25 +125,26 @@ async function showPage(value: number) {
   pageLife = new AbortController();
   const signal = pageLife.signal;
   const doc = pdf;
-  stopTranslation();
   number = Math.max(1, Math.min(doc.numPages, Math.trunc(value) || 1));
   input.value = String(number);
-  rows = [];
+  model = undefined;
+  rows.clear();
   original.replaceChildren();
   lines.replaceChildren();
   controls();
   status.textContent = '正在读取第 ' + number + ' 页…';
+  queue?.select(number);
   try {
-    const page = await doc.getPage(number);
+    const { page, content } = await getModel(doc, number);
     if (signal.aborted) return;
     try {
-      const display = await displayPage(page, signal, !besideOriginal);
+      const display = await displayPage(page, content, signal, !besideOriginal);
       if (signal.aborted) return;
       if (display.canvas) original.replaceChildren(display.canvas);
       lines.replaceChildren(display.content);
       rows = display.rows;
-      status.textContent = rows.length ? '第 ' + number + ' 页已就绪。点击翻译会向所选服务发送本页正文。'
-        : display.hasText ? '本页仅显示原文。' : '本页没有可提取的文字，扫描件需要先做 OCR。';
+      model = content;
+      updateTranslation();
     } finally { if (!signal.aborted) page.cleanup(); }
   } catch {
     if (!signal.aborted) status.textContent = '无法读取本页，请尝试其他页或重新选择文件。';
@@ -107,8 +155,11 @@ function clearDocument() {
   documentLife.abort();
   pageLife.abort();
   pdf = undefined;
-  rows = [];
-  stopTranslation();
+  model = undefined;
+  rows.clear();
+  models.clear();
+  queue?.stop();
+  queue = undefined;
   columns.hidden = true;
   original.replaceChildren();
   lines.replaceChildren();
@@ -131,6 +182,7 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
     });
     if (signal.aborted) return;
     pdf = doc;
+    queue = new PdfTranslationQueue(doc.numPages, async page => (await getModel(doc, page)).content.items, updateTranslation);
     input.max = String(doc.numPages);
     find('total').textContent = '/ ' + doc.numPages;
     columns.hidden = false;
@@ -141,39 +193,21 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
   }
 }
 
-translate.onclick = async () => {
-  if (translation || !settings || !rows.length) return;
+translate.onclick = () => {
+  if (!queue || queue.enabled || !settings) return;
   const { configured, authorized } = selectedProviderAccess(settings);
   if (!configured || !authorized) {
     status.textContent = errors[configured ? 'consent-required' : 'not-configured'];
     return;
   }
   if (source.value === target.value) { status.textContent = '原文语言与目标语言相同。'; return; }
-  const current = new AbortController();
-  translation = current;
-  controls();
-  status.textContent = '正在翻译本页…';
-  try {
-    const pending = rows.filter(row => !row.done);
-    const byId = new Map(pending.map(row => [row.item.id, row]));
-    await translatePage(pending.map(row => row.item), settings.provider, {
-      source: source.value as SourceLanguage, target: target.value as Language, range: 'main',
-    }, hostname, current.signal, (values) => {
-      for (const { id, text } of values) {
-        const row = byId.get(id)!;
-        row.p.textContent = text;
-        row.done = true;
-      }
-    });
-    if (!current.signal.aborted) status.textContent = '本页翻译完成。';
-  } catch (error) {
-    if (!current.signal.aborted) status.textContent = error instanceof Error ? error.message : errors.unavailable;
-  } finally {
-    if (translation === current) { translation = undefined; controls(); }
-  }
+  queue.start({
+    provider: settings.provider, hostname,
+    options: { source: source.value as SourceLanguage, target: target.value as Language, range: 'main' },
+  });
 };
-cancel.onclick = () => { stopTranslation(); status.textContent = '已取消，可继续翻译本页。'; };
-source.onchange = target.onchange = () => { resetTranslation(); status.textContent = '语言已更新。'; };
+cancel.onclick = () => { queue?.stop(); status.textContent = '已停止翻译。'; };
+source.onchange = target.onchange = () => { queue?.reset(); status.textContent = '语言已更新。'; };
 prev.onclick = () => void showPage(number - 1);
 next.onclick = () => void showPage(number + 1);
 input.onchange = () => void showPage(input.valueAsNumber);
@@ -184,6 +218,15 @@ file.onchange = () => {
 };
 find('settings').onclick = () => void browser.runtime.openOptionsPage();
 window.addEventListener('focus', () => void readSettings());
+browser.storage.onChanged.addListener((changes, area) => {
+  const provider = changes.providerSettings;
+  if (area === 'local' && provider) {
+    const revision = (value: unknown) => isRecord(value) ? value.revision : undefined;
+    const changed = revision(provider.newValue) !== revision(provider.oldValue);
+    if (changed) queue?.reset();
+    void readSettings(false, changed);
+  }
+});
 window.addEventListener('pagehide', clearDocument);
 
 async function initialize() {

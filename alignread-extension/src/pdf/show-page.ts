@@ -1,9 +1,37 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import { originalLine, pageLines } from './page-content';
-import { pageLayout } from './page-layout';
+import { AnnotationMode } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { originalLine, pageLines, type PdfBounds } from './page-content';
+import { graphicRegions } from './graphics';
+import { pageLayout, type PdfBand } from './page-layout';
 import type { TranslationItem } from '../shared/reader-messages';
 
-export type TranslationRow = { p: HTMLElement; item: TranslationItem; done: boolean };
+export type PageContent = { bands: PdfBand[]; items: TranslationItem[]; hasText: boolean };
+
+export async function readPage(page: PDFPageProxy): Promise<PageContent> {
+  const operators = await page.getOperatorList({ annotationMode: AnnotationMode.DISABLE });
+  const lines = await pageLines(page);
+  const pageBounds = page.view as PdfBounds;
+  const pageArea = (pageBounds[2] - pageBounds[0]) * (pageBounds[3] - pageBounds[1]);
+  // A scanned sheet can have an OCR text layer over a full-page raster image.
+  const regions = graphicRegions(operators, pageBounds).filter(([x1, y1, x2, y2]) =>
+    !lines.length || (x2 - x1) * (y2 - y1) < pageArea * .72);
+  const bands = pageLayout([
+    ...lines.filter(({ bounds: [x1, y1, x2, y2] }) => !regions.some(([left, bottom, right, top]) => {
+      const x = (x1 + x2) / 2, y = (y1 + y2) / 2;
+      return x >= left - 1 && x <= right + 1 && y >= bottom - 1 && y <= top + 1;
+    })),
+    ...regions.map(bounds => ({ text: '原页图表', keep: true, graphic: true, bounds })),
+  ], page);
+  const items: TranslationItem[] = [];
+  for (const band of bands) {
+    for (const blocks of band.columns) {
+      for (const block of blocks) {
+        if (!block.keep) items.push({ id: 'block-' + items.length, text: block.text });
+      }
+    }
+  }
+  return { bands, items, hasText: Boolean(lines.length) };
+}
 
 async function renderCanvas(page: PDFPageProxy, signal: AbortSignal) {
   const base = page.getViewport({ scale: 1 });
@@ -21,19 +49,16 @@ async function renderCanvas(page: PDFPageProxy, signal: AbortSignal) {
   return { canvas, scale };
 }
 
-export async function displayPage(page: PDFPageProxy, signal: AbortSignal, showOriginal: boolean) {
-  // Font information for protected mathematical and code lines is resolved by the operator list.
+export async function displayPage(page: PDFPageProxy, model: PageContent, signal: AbortSignal, showOriginal: boolean) {
+  signal.throwIfAborted();
   const preview = showOriginal ? await renderCanvas(page, signal) : undefined;
-  if (!showOriginal) await page.getOperatorList();
-  signal.throwIfAborted();
-  const lines = await pageLines(page);
-  signal.throwIfAborted();
-  const image = preview ?? (lines.some(line => line.keep) ? await renderCanvas(page, signal) : undefined);
+  const hasGraphics = model.bands.some(band => band.columns.some(column => column.some(block => block.keep)));
+  const image = preview ?? (hasGraphics ? await renderCanvas(page, signal) : undefined);
   signal.throwIfAborted();
   const content = document.createDocumentFragment();
-  const rows: TranslationRow[] = [];
+  const rows = new Map<string, HTMLElement>();
   const viewport = page.getViewport({ scale: 1 });
-  for (const band of pageLayout(lines, page)) {
+  for (const band of model.bands) {
     const group = document.createElement('div');
     if (band.split) {
       group.className = 'pdf-columns';
@@ -43,17 +68,20 @@ export async function displayPage(page: PDFPageProxy, signal: AbortSignal, showO
       const column = document.createElement('div');
       for (const block of blocks) {
         const p = document.createElement('p');
-        if (band.columns.length === 1 && blocks.length === 1) {
+        if (block.style) p.classList.add('pdf-' + block.style);
+        if (band.columns.length === 1 && blocks.length === 1 && block.style !== 'caption') {
           const [left, bottom, right, top] = block.bounds;
           const [start] = viewport.convertToViewportPoint(left, bottom);
           const [end] = viewport.convertToViewportPoint(right, top);
           if (Math.abs(start + end - viewport.width) < viewport.width * .1 &&
             Math.abs(end - start) < viewport.width * .8) p.style.textAlign = 'center';
         }
-        if (block.keep && image) p.append(originalLine(image.canvas, block, page, image.scale));
-        else {
+        if (block.keep && image) {
+          if (block.graphic) p.className = 'pdf-figure';
+          p.append(originalLine(image.canvas, block, page, image.scale));
+        } else {
           p.textContent = block.text;
-          rows.push({ p, item: { id: 'block-' + rows.length, text: block.text }, done: false });
+          rows.set(model.items[rows.size]!.id, p);
         }
         column.append(p);
       }
@@ -61,5 +89,5 @@ export async function displayPage(page: PDFPageProxy, signal: AbortSignal, showO
     }
     content.append(group);
   }
-  return { canvas: preview?.canvas, content, rows, hasText: Boolean(lines.length) };
+  return { canvas: preview?.canvas, content, rows };
 }
