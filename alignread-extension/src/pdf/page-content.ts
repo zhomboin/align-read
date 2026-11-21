@@ -2,7 +2,7 @@ import type { PDFPageProxy } from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { hasProse } from './equations';
 import { mergeInlineFragments } from './inline-fragments';
-import { inlineMath, withoutMath, type InlineMath, type TextRun } from './inline-math';
+import { inlineMath, mainTextRun, withoutMath, type InlineMath, type TextRun } from './inline-math';
 
 export type PdfBounds = [number, number, number, number];
 export type PdfAlignment = 'left' | 'center' | 'right';
@@ -19,11 +19,12 @@ export type PdfLine = {
   equationPosition?: { start: number; width: number };
   style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number' | 'footnote' | 'reference';
   fontSize?: number;
+  textLine?: Pick<TextRun, 'baseline' | 'size'>;
   bold?: boolean;
   level?: number;
   alignment?: PdfAlignment;
 };
-export type PlacedLine = PdfLine & { x: number; y: number; end: number; height: number };
+export type PlacedLine = PdfLine & { x: number; y: number; end: number; height: number; baselineY?: number };
 const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)/i;
 const codeFont = /mono|courier|cmtt/i;
 const boldFont = /bold|demi|heavy|black|semibold|(?:[-, ](?:medi(?:um)?|bd))\b|\+cmbx\d/i;
@@ -73,11 +74,14 @@ export async function pageLines(page: PDFPageProxy) {
     const leading = text.length - text.trimStart().length;
     text = text.trim();
     for (const run of runs) { run.start -= leading; run.end -= leading; }
-    const inline = inlineMath(text, runs);
+    const main = mainTextRun(runs);
+    const textLine = main && { baseline: main.baseline, size: main.size };
+    const inline = inlineMath(text, runs, main);
     const prose = inline.length ? withoutMath(text, inline) : text;
     const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text);
     const mixed = inline.length > 0 && (hasProse(prose, 1) || /\p{Script=Han}/u.test(prose));
-    const code = runs.filter(run => /[\p{L}\p{N}]/u.test(run.text)).every(run => run.code);
+    const lexical = runs.filter(run => /[\p{L}\p{N}]/u.test(run.text));
+    const code = lexical.length > 0 && lexical.every(run => run.code);
     const marker = runs[0], following = runs[1];
     const noteStart = marker && following && /^\d{1,3}$/.test(marker.text.trim()) &&
       marker.size <= following.size * .85 && marker.baseline > following.baseline + following.size * .12 &&
@@ -92,7 +96,7 @@ export async function pageLines(page: PDFPageProxy) {
       text, keep, math, code, noteStart, labelEnd: hasLabel ? labelEnd : undefined,
       runs, inline: !keep && mixed ? inline : undefined,
       textWithoutMath: inline.length ? prose : undefined,
-      bounds: [left, bottom, right, top], fontSize: textWidth ? fontSize / textWidth : undefined,
+      bounds: [left, bottom, right, top], textLine, fontSize: textWidth ? fontSize / textWidth : undefined,
       bold: textWidth > 0 && boldWidth >= textWidth * .75,
     });
     current = [];

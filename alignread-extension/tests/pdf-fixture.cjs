@@ -57,9 +57,15 @@ function fixturePdf() {
     text(292, 143, 'z = 3'),
   ].join('\n');
   const wideEquation = [
-    text(20, 79, 'f ='), text(64, 92, 'N', 9), text(60, 81, 'X', 14), text(60, 67, 'i=1', 9),
-    text(87, 79, 'b1 + b2 + b3 + b4 + b5 + b6 + b7'), text(269, 79, '+ 0.5'),
+    text(20, 79, 'L = loss := a', 10), text(100, 92, 'N', 9), text(96, 81, 'X', 14), text(96, 67, 'i=1', 9),
+    text(121, 79, 'b1 + b2 + b3 + b4 + b5 + b6 + b7', 10), text(269, 79, '+ 0.5'),
     text(285, 54, '\\(5.2\\)'),
+  ].join('\n');
+  const inlineFraction = [
+    text(20, 119, 'Before the fraction f ='), text(142, 125, 'u + v', 8),
+    text(139, 114, '1 + uv', 8), text(167, 119, 'and its value stays finite.'),
+    '139 122 m 164 122 l S',
+    text(20, 105, 'The explanation continues in the same paragraph.'),
   ].join('\n');
   const page = contents => '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 300] /Resources << /Font << /F1 4 0 R /F2 14 0 R >> /XObject << /Figure 9 0 R >> >> ' + contents + ' >>';
   const stream = (text, entries = '') => '<< ' + entries + ' /Length ' + text.length + ' >>\nstream\n' + text + '\nendstream';
@@ -68,9 +74,9 @@ function fixturePdf() {
     page(''), page('/Contents 8 0 R'), stream([chapter, columns, columnEquations, subsection, graphics].join('\n')),
     stream(drawing, '/Type /XObject /Subtype /Form /BBox [0 0 260 60] /Resources << /Font << /F1 4 0 R >> >>'),
     page('/Contents 12 0 R'), page('/Contents 13 0 R'),
-    stream([horizontalTable, indexedConditions, displayFunction,
+    stream([horizontalTable, text(110, 230, 'Table 1: Centered data', 10), indexedConditions, displayFunction,
       text(20, 132, 'Fourth page prose above the enclosed table.', 14), table, notes, text(20, 12, '4')].join('\n')),
-    stream([text(20, 110, 'Fifth page prose', 14), text(289, 282, 'v'), alignment, wideEquation].join('\n')),
+    stream([text(289, 282, 'v'), alignment, inlineFraction, wideEquation].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
     // The range reader should be able to leave an unreferenced stream untouched.
     stream(' '.repeat(2 * 1024 * 1024))];

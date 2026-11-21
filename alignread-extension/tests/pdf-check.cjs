@@ -209,6 +209,27 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert(placements[0].start < .03 && placements[1].start > .32 && placements[1].start < .42 &&
       placements[1].end > .95 && placements[2].start > .85, JSON.stringify(placements));
     assert(placements[3].start < .03 && placements[3].end > .93 && placements[3].height > 80, JSON.stringify(placements[3]));
+    const fractionParagraph = await evaluate(`(() => {
+      const paragraph = [...document.querySelectorAll('.pdf-sheet[aria-current] .pdf-translation p')]
+        .find(node => node.textContent.includes('Before the fraction'));
+      const canvases = [...paragraph?.querySelectorAll('.pdf-inline-math canvas') ?? []];
+      const after = canvases[0]?.parentElement.nextSibling;
+      const range = document.createRange();
+      let continuesInline = false;
+      if (after?.nodeType === Node.TEXT_NODE && after.textContent.includes('and')) {
+        const start = after.textContent.indexOf('and');
+        range.setStart(after, start);
+        range.setEnd(after, start + 3);
+        const text = range.getBoundingClientRect();
+        const formula = canvases[0].getBoundingClientRect();
+        continuesInline = text.top < formula.bottom && text.bottom > formula.top;
+      }
+      return { text: paragraph?.textContent, formulas: canvases.map(canvas => canvas.ariaLabel), continuesInline };
+    })()`);
+    assert.equal(fractionParagraph.formulas.length, 1);
+    assert(fractionParagraph.formulas[0].includes('u + v') && fractionParagraph.formulas[0].includes('1 + uv'), JSON.stringify(fractionParagraph));
+    assert(fractionParagraph.text.includes('and its value stays finite. The explanation continues in the same paragraph.'));
+    assert(fractionParagraph.continuesInline);
     await evaluate('window.pdfRelease()');
     await wheelToward(1);
     await hasStatus('第 1 页翻译完成');
@@ -224,10 +245,12 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       ['公式 (4.1)', '公式 (4.2)']);
     assert(await evaluate('!document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("r = limit")'));
     assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 2'));
+    assert(await evaluate('(() => { const node = document.querySelector(".pdf-sheet[aria-current] .pdf-caption"); return node?.textContent === "Table 1: Centered data" && getComputedStyle(node).textAlign === "center"; })()'));
     assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("Labels inside the table")')));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 7'));
     assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), [
+      'Table 1: Centered data',
       'Fourth page prose above the enclosed table.',
       '[[ARF0]]First source note has a superscript.',
       '[[ARF0]]Second source note must stay separate.',

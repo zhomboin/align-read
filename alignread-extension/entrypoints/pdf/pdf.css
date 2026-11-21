@@ -49,6 +49,7 @@ button:disabled { opacity: .5; cursor: default; }
 .pdf-translation .pdf-equation { margin: .8em 0; }
 .pdf-translation .pdf-equation canvas { display: block; }
 .pdf-translation .pdf-inline-math { display: inline-block; font-family: serif; white-space: nowrap; max-width: 100%; text-indent: 0; }
+.pdf-translation .pdf-inline-url { display: inline; font-family: inherit; white-space: normal; overflow-wrap: anywhere; }
 .pdf-columns { display: grid; column-gap: clamp(10px, 2vw, 28px); align-items: start; }
 .pdf-columns > div { min-width: 0; }
 .pdf-translation > div + div { margin-top: .6em; }

@@ -71,7 +71,10 @@ function translationRow(node: HTMLElement, item: PdfTranslationItem, page: PDFPa
     const math = markers.math[index]!;
     const span = document.createElement('span');
     span.className = 'pdf-inline-math';
-    if (position && image) {
+    if (/^https?:\/\//i.test(math)) {
+      span.classList.add('pdf-inline-url');
+      span.textContent = math;
+    } else if (position && image) {
       const { bounds, baseline, size } = position;
       const crop = originalLine(image.canvas, { bounds, text: math, keep: true }, page, image.scale, true);
       if (crop instanceof HTMLCanvasElement) {

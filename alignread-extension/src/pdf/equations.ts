@@ -4,6 +4,7 @@ const equationTag = /^\(\s*(?:[A-Z]\.)?\d+(?:\.\d+)*[a-z]?\s*\)$/i;
 const mathWords = /^(?:arcsin|arccos|arctan|sin|cos|tan|sinh|cosh|tanh|exp|log|ln|lim|sup|inf|min|max|det|mod|gcd|arg)$/i;
 const words = /\p{L}{2,}/gu;
 const codeCall = /^([\p{L}_][\p{L}\p{N}_.]*)\([^]*\)[.,;]?$/u;
+const mathAssignment = /^[\p{L}_][\p{L}\p{N}_]*\s*=\s*[^=]*?:=\s*\p{L}/u;
 
 function codeName(line: PlacedLine) {
   return line.code ? codeCall.exec(line.text)?.[1] : undefined;
@@ -18,6 +19,8 @@ export function supportsEquation(line: PlacedLine) {
   if (line.style || line.graphic) return false;
   if (codeName(line)) return true;
   if (!(line.math || line.keep || mathWords.test(line.text))) return false;
+  // Named quantities can be ordinary-font prefixes of a symbolic definition.
+  if (line.keep && line.math && !line.code && mathAssignment.test(line.text) && !/\p{L}{2,}\s+\p{L}{2,}/u.test(line.text)) return true;
   const text = line.textWithoutMath ?? line.text;
   // Short variable names and roman operators can coexist with math-font glyphs in a display equation.
   const narrative = text.replace(/\b(?:[A-Z][A-Z0-9]+\s*|[A-Za-z][A-Za-z0-9_]*)(?=\()/g, '')

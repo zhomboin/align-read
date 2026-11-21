@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
-import type { PdfLine, PlacedLine } from './page-content';
+import type { PdfAlignment, PdfLine, PlacedLine } from './page-content';
 import { groupEquations, hasProse, supportsEquation } from './equations';
 import { pageTypography } from './page-typography';
 
@@ -40,6 +40,28 @@ function wrapsMath(line: PlacedLine, previous: PlacedLine, edge: number) {
   return closes.length > opens.length;
 }
 
+function sameParagraph(previous: PlacedLine, line: PlacedLine, hangingIndent: boolean) {
+  const height = previous.textLine ? previous.textLine.size * 1.25 : previous.height;
+  const nextHeight = line.textLine ? line.textLine.size * 1.25 : line.height;
+  // Tall fractions and raised scripts can change the ink box without moving its text row.
+  const gap = line.baselineY !== undefined && previous.baselineY !== undefined
+    ? line.baselineY - previous.baselineY : line.y - previous.y;
+  return gap > 0 && gap < height * 1.48 && Math.abs(nextHeight - height) < height * .15 &&
+    (hangingIndent || line.x <= previous.x + nextHeight * .55) && Math.abs(previous.x - line.x) < nextHeight * 2;
+}
+
+function captionAlignment(line: PlacedLine, frame: [number, number], previous?: PlacedLine): PdfAlignment {
+  const em = line.textLine?.size ?? line.height;
+  const nearGraphic = previous?.graphic && line.y - (previous.y + previous.height / 2) < em * 3;
+  const anchors = nearGraphic ? [frame, [previous.x, previous.end] as const] : [frame];
+  for (const [left, right] of anchors) {
+    if (line.end - line.x >= (right - left) * .92) continue;
+    if (Math.abs((line.x + line.end - left - right) / 2) <= em * .65) return 'center';
+    if (Math.abs(line.end - right) <= em * .65) return 'right';
+  }
+  return 'left';
+}
+
 function paragraphs(lines: PlacedLine[], frame: [number, number]) {
   const result: PdfLine[] = [];
   let previous: PlacedLine | undefined;
@@ -52,7 +74,7 @@ function paragraphs(lines: PlacedLine[], frame: [number, number]) {
     const noteContinuation = last?.style === 'footnote' && line.style === 'footnote' && !line.noteStart;
     const bodyContinuation = (!last?.style || last.style === 'caption') && !line.style && !line.labelEnd && !reference &&
       !/^\s*\(\d{1,2}\)\s/.test(line.text);
-    const hangingIndent = referenceContinuation || last && /^\(\d{1,2}\)\s/.test(last.text);
+    const hangingIndent = referenceContinuation || /^\(\d{1,2}\)\s/.test(last?.text ?? '');
     const referenceYear = referenceContinuation && /^\d{4}\.?$/.test(line.text);
     if (last && previous && !previous.keep && wrapsMath(line, previous, edge)) {
       const size = previous.fontSize ?? line.height / 1.25;
@@ -63,10 +85,7 @@ function paragraphs(lines: PlacedLine[], frame: [number, number]) {
       }];
     } else if (last && previous && (!previous.keep || referenceContinuation) && (!line.keep || referenceYear) &&
       (noteContinuation || referenceContinuation || bodyContinuation) &&
-      line.y > previous.y &&
-      line.y - previous.y < previous.height * 1.48 &&
-      Math.abs(line.height - previous.height) < previous.height * .15 &&
-      (hangingIndent || line.x <= previous.x + line.height * .55) && Math.abs(previous.x - line.x) < line.height * 2 &&
+      sameParagraph(previous, line, hangingIndent) &&
       (noteContinuation || edge - previous.end < previous.height * 2)) {
       const join = last.text.endsWith('\u00ad') || (/[-\u2010]$/.test(last.text) && /^\p{L}/u.test(line.text)) ||
         (/[\u3400-\u9fff]$/.test(last.text) && /^[\u3400-\u9fff]/.test(line.text)) ? '' : ' ';
@@ -94,6 +113,8 @@ function paragraphs(lines: PlacedLine[], frame: [number, number]) {
         ...line, style: 'reference',
         inline: [{ start: 0, end, leading: true }, ...line.inline?.filter(span => span.start >= end) ?? []],
       });
+    } else if (line.style === 'caption') {
+      result.push({ ...line, alignment: captionAlignment(line, frame, previous) });
     } else {
       result.push({ ...line });
     }
@@ -149,7 +170,9 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
     const [x2, y2] = viewport.convertToViewportPoint(right, top);
     return {
       ...line, x: Math.min(x1, x2), end: Math.max(x1, x2),
-      y: (y1 + y2) / 2, height: Math.max(1, Math.abs(y1 - y2))
+      y: (y1 + y2) / 2, height: Math.max(1, Math.abs(y1 - y2)),
+      baselineY: line.textLine && viewport.rotation % 180 === 0
+        ? viewport.convertToViewportPoint(left, line.textLine.baseline)[1] : undefined,
     };
   }).sort((a, b) => a.y - b.y || a.x - b.x);
   const { content, header, footer } = pageTypography(markStyles(positions, viewport.width, viewport.height),
