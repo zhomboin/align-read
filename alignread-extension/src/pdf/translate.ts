@@ -1,12 +1,62 @@
 import { splitText } from '../shared/split-text';
 import { browser } from 'wxt/browser';
 import { LIMITS, errors, type BatchResult, type ProviderId, type ReadingOptions, type Result, type TranslationItem } from '../shared/reader-messages';
+import { alignMarkerBoundaries, mathPlaceholders, type PdfTranslationItem } from './math-placeholders';
 
-export async function translatePage(items: TranslationItem[], provider: ProviderId, options: ReadingOptions, hostname: string,
+export async function translatePage(items: PdfTranslationItem[], provider: ProviderId, options: ReadingOptions, hostname: string,
+  signal: AbortSignal, show: (values: TranslationItem[]) => void) {
+  const protectedRows = new Map(items.filter(item => item.inline?.length).map(item => [item.id, mathPlaceholders(item)]));
+  const needsFallback = new Set<string>();
+  const encoded = items.map(({ id, text }) => {
+    const math = protectedRows.get(id);
+    return { id, text: math ? math.combine(math.pieces) : text };
+  });
+  await sendItems(encoded, provider, options, hostname, signal, values => {
+    show(values.filter(item => {
+      const math = protectedRows.get(item.id);
+      if (!math || math.parse(item.text)) return true;
+      needsFallback.add(item.id);
+      return false;
+    }));
+  });
+  if (!needsFallback.size) return;
+
+  // Some services change or remove placeholders. Translate only the surrounding
+  // text in that case and reinsert the original formula nodes in source order.
+  const fragments: TranslationItem[] = [];
+  const rows = new Map<string, { id: string; pieces: string[]; waiting: number; join: (pieces: string[]) => string }>();
+  const byFragment = new Map<string, { rowId: string; index: number; source: string }>();
+  for (const id of needsFallback) {
+    const math = protectedRows.get(id)!;
+    const row = { id, pieces: [...math.pieces], waiting: 0, join: math.combine };
+    rows.set(id, row);
+    for (const [index, text] of row.pieces.entries()) {
+      if (!/\p{L}/u.test(text)) continue;
+      const fragment = id + '-text-' + index;
+      byFragment.set(fragment, { rowId: id, index, source: text });
+      fragments.push({ id: fragment, text });
+      row.waiting++;
+    }
+    if (!row.waiting) show([{ id, text: row.join(row.pieces) }]);
+  }
+  if (!fragments.length) return;
+  await sendItems(fragments, provider, options, hostname, signal, values => {
+    const done: TranslationItem[] = [];
+    for (const { id, text } of values) {
+      const { rowId, index, source } = byFragment.get(id)!;
+      const row = rows.get(rowId)!;
+      row.pieces[index] = (source.match(/^\s*/)?.[0] ?? '') + text.trim() + (source.match(/\s*$/)?.[0] ?? '');
+      if (--row.waiting === 0) done.push({ id: row.id, text: row.join(row.pieces) });
+    }
+    show(done);
+  });
+}
+
+async function sendItems(items: TranslationItem[], provider: ProviderId, options: ReadingOptions, hostname: string,
   signal: AbortSignal, show: (values: TranslationItem[]) => void) {
   const groups = new Map<string, { row: string; parts: string[]; index: number; }>();
   const chunks = items.flatMap(item => {
-    const texts = splitText(item.text).filter(text => text.trim());
+    const texts = alignMarkerBoundaries(item.text, splitText(item.text)).filter(text => text.trim());
     const parts = Array<string>(texts.length).fill('');
     return texts.map((text, index) => {
       const id = item.id + '-' + index;

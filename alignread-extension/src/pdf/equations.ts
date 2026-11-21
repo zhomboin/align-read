@@ -4,13 +4,13 @@ const equationTag = /^\(\s*(?:[A-Z]\.)?\d+(?:\.\d+)*[a-z]?\s*\)$/i;
 const mathWords = /^(?:arcsin|arccos|arctan|sin|cos|tan|sinh|cosh|tanh|exp|log|ln|lim|sup|inf|min|max|det|mod|gcd|arg)$/i;
 const words = /\p{L}{2,}/gu;
 
-export function hasProse(text: string) {
-  return (text.match(words) ?? []).filter(word => !mathWords.test(word)).length >= 3 ||
+export function hasProse(text: string, minimum = 3) {
+  return (text.match(words) ?? []).filter(word => !mathWords.test(word)).length >= minimum ||
     /[\u3400-\u9fff]{4,}/u.test(text);
 }
 
 function supportsEquation(line: PlacedLine) {
-  return !line.style && !line.graphic && !hasProse(line.text) &&
+  return !line.style && !line.graphic && !line.inline && !hasProse(line.text) &&
     (line.math || line.keep || mathWords.test(line.text));
 }
 

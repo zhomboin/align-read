@@ -1,4 +1,5 @@
-import { errors, type ProviderId, type ReadingOptions, type TranslationItem } from '../shared/reader-messages';
+import { errors, type ProviderId, type ReadingOptions } from '../shared/reader-messages';
+import type { PdfTranslationItem } from './math-placeholders';
 import { translatePage } from './translate';
 
 export const pdfLookAhead = 2;
@@ -15,7 +16,7 @@ export class PdfTranslationQueue {
   error?: string;
   failedPage?: number;
 
-  constructor(private total: number, private read: (page: number) => Promise<TranslationItem[]>,
+  constructor(private total: number, private read: (page: number) => Promise<PdfTranslationItem[]>,
     private update: () => void) { }
 
   get translatingPage() { return this.job?.page; }

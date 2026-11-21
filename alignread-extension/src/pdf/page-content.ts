@@ -1,11 +1,14 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import { hasProse } from './equations';
+import { inlineMath, withoutMath, type InlineMath, type TextRun } from './inline-math';
 
 export type PdfBounds = [number, number, number, number];
 export type PdfLine = {
   text: string; keep: boolean; bounds: PdfBounds;
   graphic?: boolean;
   math?: boolean;
+  inline?: InlineMath[];
   blankBefore?: number;
   blankAfter?: number;
   style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation';
@@ -14,7 +17,7 @@ export type PlacedLine = PdfLine & { x: number; y: number; end: number; height: 
 const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)/i;
 const codeFont = /mono|courier|cmtt/i;
 const mathText = /[\p{Sm}α-ωΑ-Ω\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
-const looksLikeCode = /[{}]|;\s*$|(?:=>|:=|\/\/|\/\*|\w+\([^)]*\)|\w+\s*[_^]\s*[\w{])|^\s*(?:#|def |class |import |return |const |let |function )/;
+const looksLikeCode = /=>|:=|^\s*(?:\/\/|\/\*|#include\b|def\s+\w+\([^)]*\)\s*:|(?:let|const)\s+\w+\s*=.*;\s*$)|[{}]\s*;?$/;
 
 export async function pageLines(page: PDFPageProxy) {
   const { items, styles } = await page.getTextContent();
@@ -26,26 +29,37 @@ export async function pageLines(page: PDFPageProxy) {
     if (!current.length) return;
     let text = '';
     let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
-    let protectedFont = false;
-    let math = false;
+    let rotated = false;
+    const runs: TextRun[] = [];
     for (const item of current) {
       const [, , , , x, y] = item.transform;
       const size = Math.max(1, item.height || Math.hypot(item.transform[2], item.transform[3]));
       if (x - right > size * .15 && text && !/\s$/.test(text) && !/^\s/.test(item.str)) text += ' ';
+      const start = text.length;
       text += item.str;
       left = Math.min(left, x); right = Math.max(right, x + item.width);
       bottom = Math.min(bottom, y - size * .25); top = Math.max(top, y + size);
       const font = page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName) : undefined;
       if (item.str.trim()) {
         const names = (font?.name ?? '') + ' ' + (styles[item.fontName]?.fontFamily ?? '');
-        math ||= mathFont.test(names);
-        protectedFont ||= math || codeFont.test(names) || Math.abs(item.transform[1]) > .01;
+        rotated ||= Math.abs(item.transform[1]) > .01;
+        runs.push({
+          start, end: text.length, text: item.str, baseline: y, size,
+          math: mathFont.test(names), code: codeFont.test(names), bounds: [x, y - size * .25, x + item.width, y + size]
+        });
       }
     }
+    const leading = text.length - text.trimStart().length;
     text = text.trim();
-    const keep = protectedFont || mathText.test(text) || looksLikeCode.test(text) ||
-      !/\p{L}{2}/u.test(text) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text);
-    if (text) lines.push({ text, keep, math: math || mathText.test(text) || /[=+·…]/.test(text), bounds: [left, bottom, right, top] });
+    for (const run of runs) { run.start -= leading; run.end -= leading; }
+    const inline = inlineMath(text, runs);
+    const prose = inline.length ? withoutMath(text, inline) : text;
+    const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text);
+    const mixed = inline.length > 0 && (hasProse(prose, 1) || /\p{Script=Han}/u.test(prose));
+    const keep = rotated || looksLikeCode.test(text) || runs.every(run => run.code) ||
+      (!mixed && !/\p{L}{2}/u.test(text)) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text) ||
+      (math && !mixed && !hasProse(text));
+    if (text) lines.push({ text, keep, math, inline: !keep && mixed ? inline : undefined, bounds: [left, bottom, right, top] });
     current = [];
   }
   for (const item of items) {
@@ -72,15 +86,16 @@ export async function pageLines(page: PDFPageProxy) {
   return lines;
 }
 
-export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number) {
+export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number, inline = false) {
   const viewport = page.getViewport({ scale });
   const [left, bottom, right, top] = line.bounds;
   const [x1, y1] = viewport.convertToViewportPoint(left, bottom);
   const [x2, y2] = viewport.convertToViewportPoint(right, top);
   const padding = line.style === 'equation' ? Math.ceil(2 * scale) : 2;
-  const x = Math.max(0, Math.floor(Math.min(x1, x2)) - padding);
+  const xPadding = inline ? 0 : padding;
+  const x = Math.max(0, Math.floor(Math.min(x1, x2)) - xPadding);
   const y = Math.max(0, Math.floor(Math.min(y1, y2)) - padding);
-  const width = Math.min(canvas.width - x, Math.ceil(Math.max(x1, x2)) + padding - x);
+  const width = Math.min(canvas.width - x, Math.ceil(Math.max(x1, x2)) + xPadding - x);
   const height = Math.min(canvas.height - y, Math.ceil(Math.max(y1, y2)) + padding - y);
   if (width <= 0 || height <= 0) return document.createTextNode(line.text);
   const before = Math.round((line.blankBefore ?? 0) * scale);

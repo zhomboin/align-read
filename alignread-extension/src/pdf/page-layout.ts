@@ -44,7 +44,11 @@ function paragraphs(lines: PlacedLine[]) {
       edge - previous.end < previous.height * 2) {
       const join = last.text.endsWith('\u00ad') || (/[-\u2010]$/.test(last.text) && /^\p{L}/u.test(line.text)) ||
         (/[\u3400-\u9fff]$/.test(last.text) && /^[\u3400-\u9fff]/.test(line.text)) ? '' : ' ';
-      last.text = last.text.replace(/\u00ad$/, '') + join + line.text;
+      const prefix = last.text.replace(/\u00ad$/, '') + join;
+      if (line.inline) last.inline = [...last.inline ?? [], ...line.inline.map(span => ({
+        ...span, start: prefix.length + span.start, end: prefix.length + span.end,
+      }))];
+      last.text = prefix + line.text;
     } else {
       result.push({ ...line });
     }

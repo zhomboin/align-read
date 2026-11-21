@@ -3,9 +3,10 @@ import { AnnotationMode } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { originalLine, pageLines, type PdfBounds } from './page-content';
 import { graphicRegions } from './graphics';
 import { pageLayout, type PdfBand } from './page-layout';
-import type { TranslationItem } from '../shared/reader-messages';
+import { mathPlaceholders, type PdfTranslationItem } from './math-placeholders';
 
-export type PageContent = { bands: PdfBand[]; items: TranslationItem[]; hasText: boolean };
+export type PageContent = { bands: PdfBand[]; items: PdfTranslationItem[]; hasText: boolean };
+export type TranslationRow = (value?: string) => void;
 
 export async function readPage(page: PDFPageProxy): Promise<PageContent> {
   const operators = await page.getOperatorList({ annotationMode: AnnotationMode.DISABLE });
@@ -22,11 +23,11 @@ export async function readPage(page: PDFPageProxy): Promise<PageContent> {
     })),
     ...regions.map(bounds => ({ text: '原页图表', keep: true, graphic: true, bounds })),
   ], page);
-  const items: TranslationItem[] = [];
+  const items: PdfTranslationItem[] = [];
   for (const band of bands) {
     for (const blocks of band.columns) {
       for (const block of blocks) {
-        if (!block.keep) items.push({ id: 'block-' + items.length, text: block.text });
+        if (!block.keep) items.push({ id: 'block-' + items.length, text: block.text, inline: block.inline });
       }
     }
   }
@@ -49,14 +50,57 @@ async function renderCanvas(page: PDFPageProxy, signal: AbortSignal) {
   return { canvas, scale };
 }
 
+function translationRow(node: HTMLParagraphElement, item: PdfTranslationItem, page: PDFPageProxy,
+  image?: { canvas: HTMLCanvasElement; scale: number }): TranslationRow {
+  if (!item.inline?.length) return value => {
+    const text = value ?? item.text;
+    if (node.textContent !== text) node.textContent = text;
+  };
+  const markers = mathPlaceholders(item);
+  const formulaNodes = markers.spans.map(({ position, scripts }, index) => {
+    const math = markers.math[index]!;
+    const span = document.createElement('span');
+    span.className = 'pdf-inline-math';
+    if (position && image) {
+      const { bounds, baseline, size } = position;
+      const crop = originalLine(image.canvas, { bounds, text: math, keep: true }, page, image.scale, true);
+      if (crop instanceof HTMLCanvasElement) {
+        crop.style.width = crop.width / (size * image.scale) + 'em';
+        crop.style.verticalAlign = (bounds[1] - baseline - 2 / image.scale) / size + 'em';
+      }
+      span.append(crop);
+    } else {
+      let from = 0;
+      for (const script of scripts ?? []) {
+        const element = document.createElement(script.kind);
+        element.textContent = math.slice(script.start, script.end);
+        span.append(math.slice(from, script.start), element);
+        from = script.end;
+      }
+      span.append(math.slice(from));
+    }
+    return span;
+  });
+  const source = markers.combine(markers.pieces);
+  let rendered = '';
+  return value => {
+    const text = value ?? source;
+    if (text === rendered) return;
+    const pieces = markers.parse(text) ?? markers.parse(source)!;
+    node.replaceChildren(...pieces.map(part => typeof part === 'number' ? formulaNodes[part]! : part));
+    rendered = text;
+  };
+}
+
 export async function displayPage(page: PDFPageProxy, model: PageContent, signal: AbortSignal, showOriginal: boolean) {
   signal.throwIfAborted();
   const preview = showOriginal ? await renderCanvas(page, signal) : undefined;
-  const hasGraphics = model.bands.some(band => band.columns.some(column => column.some(block => block.keep)));
+  const hasGraphics = model.bands.some(band => band.columns.some(column => column.some(block =>
+    block.keep || block.inline?.some(span => span.position))));
   const image = preview ?? (hasGraphics ? await renderCanvas(page, signal) : undefined);
   signal.throwIfAborted();
   const content = document.createDocumentFragment();
-  const rows = new Map<string, HTMLElement>();
+  const rows = new Map<string, TranslationRow>();
   for (const band of model.bands) {
     const group = document.createElement('div');
     if (band.split) {
@@ -72,8 +116,10 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
           if (block.graphic) p.className = 'pdf-figure';
           p.append(originalLine(image.canvas, block, page, image.scale));
         } else {
-          p.textContent = block.text;
-          rows.set(model.items[rows.size]!.id, p);
+          const item = model.items[rows.size]!;
+          const render = translationRow(p, item, page, image);
+          render();
+          rows.set(item.id, render);
         }
         column.append(p);
       }

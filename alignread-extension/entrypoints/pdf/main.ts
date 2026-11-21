@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { openDocument, type PdfInput } from '../../src/pdf/document';
-import { displayPage, readPage, type PageContent } from '../../src/pdf/show-page';
+import { displayPage, readPage, type PageContent, type TranslationRow } from '../../src/pdf/show-page';
 import { PdfTranslationQueue, pdfLookAhead } from '../../src/pdf/translation-queue';
 import { request } from '../../src/shared/extension';
 import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
@@ -39,7 +39,7 @@ let number = 0;
 let hostname = '';
 let settings: PublicSettings | undefined;
 let model: PageContent | undefined;
-let rows = new Map<string, HTMLElement>();
+let rows = new Map<string, TranslationRow>();
 let settingsRequest = 0;
 const models = new Map<number, Promise<{ page: PDFPageProxy; content: PageContent }>>();
 let besideOriginal = false;
@@ -71,9 +71,7 @@ function updateTranslation() {
   if (!model) return;
   const result = queue?.result(number);
   for (const item of model.items) {
-    const node = rows.get(item.id);
-    const text = result?.values.get(item.id) ?? item.text;
-    if (node && node.textContent !== text) node.textContent = text;
+    rows.get(item.id)?.(result?.values.get(item.id));
   }
   const job = queue?.translatingPage;
   const pageStatus = !model.items.length

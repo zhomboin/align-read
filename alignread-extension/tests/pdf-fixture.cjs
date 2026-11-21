@@ -5,7 +5,13 @@ function fixturePdf() {
     text(x + 30, y + 15, '!', 12), text(labelX, y, '\\(' + label + '\\)'),
     (x + 18) + ' ' + (y + 4) + ' m ' + (x + 29) + ' ' + (y + 4) + ' l S',
   ].join('\n');
-  const prose = 'BT /F1 14 Tf 20 150 Td (Ordinary prose) Tj 0 -25 Td (x = 2) Tj 0 -25 Td (Let a + b be positive) Tj ET\n' +
+  const research = text(20, 240, 'Research for AI + Science remains useful.') +
+    '\n' + text(20, 270, 'function parametrized as a spline.') +
+    '\n' + text(20, 295, 'function f\\(x\\) is smooth on this interval.');
+  const exponent = [text(20, 215, 'The result is'), text(89, 215, '10'), text(102.3, 219.3, '2', 8),
+  text(110, 215, 'with modest error.')].join('\n');
+  const prose = research + '\n' + exponent + '\n' +
+    'BT /F1 14 Tf 20 150 Td (Ordinary prose) Tj 0 -25 Td (x = 2) Tj 0 -25 Td (Let a + b and c + d be positive) Tj ET\n' +
     fraction(125, 62, 270, '1.1') + '\n' + text(155, 20, '1');
   const columns = [
     [135, 260, 'Article title'], [20, 200, 'Inside the left column'], [180, 191, 'Inside the right column'],

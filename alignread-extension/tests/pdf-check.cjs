@@ -53,7 +53,16 @@ function mockViewer(origin) {
       disconnect() { window.pdfDisconnects = (window.pdfDisconnects ?? 0) + 1; },
       postMessage({ id, items }) {
         pdfBatches.push(items);
-        const batch = { ok: true, value: { id, items: items.map(item => ({ id: item.id, text: '译 ' + item.text })) } };
+        const batch = {
+          ok: true, value: {
+            id, items: items.map(item => ({
+              id: item.id,
+              text: params.has('reorder') && item.text.startsWith('Let [[ARF0]]')
+                ? '译 先 [[ARF1]]，再 [[ARF0]]'
+                : '译 ' + (params.has('fallback') ? item.text.replace(/\[\[ARF\d+\]\]/g, '') : item.text),
+            }))
+          },
+        };
         if (window.pdfHold === true || items.some(item => item.text === window.pdfHold)) {
           window.pdfRelease = () => receive(batch);
           return;
@@ -110,8 +119,10 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await until(() => evaluate('document.querySelector("#status")?.textContent.includes("第 1 页已就绪")'));
     assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 5');
     assert(await evaluate('!document.querySelector("#original canvas") && !!document.querySelector("#lines canvas[aria-label=\\"x = 2\\"]")'));
-    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines canvas")].map(canvas => canvas.ariaLabel)'),
-      ['x = 2', 'Let a + b be positive', '公式 (1.1)', '1']);
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines p > canvas")].map(canvas => canvas.ariaLabel)'),
+      ['x = 2', '公式 (1.1)', '1']);
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-inline-math")].map(node=>node.textContent || node.querySelector("canvas")?.ariaLabel)'),
+      ['f(x)', '102', 'a + b', 'c + d']);
     assert(await evaluate('document.querySelector(".pdf-equation canvas").height > 60 && !document.querySelector("#lines .pdf-columns")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
     assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2);
@@ -127,8 +138,10 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     const right = 'Inside the right column finishes here.';
     const caption = 'Figure 1: Comparison of both columns.';
     await until(() => evaluate('pdfBatches.length === 4 && document.querySelector("#cancel").textContent === "停止预译"'));
+    const firstPage = ['function [[ARF0]] is smooth on this interval.', 'function parametrized as a spline.', 'Research for AI + Science remains useful.',
+      'The result is [[ARF0]] with modest error.', 'Ordinary prose', 'Let [[ARF0]] and [[ARF1]] be positive'];
     assert.deepEqual(await evaluate('pdfBatches.map(b => b.map(i => i.text))'), [
-      ...Array(3).fill(['Ordinary prose']), ['Article title', left, right, 'Closing note', caption],
+      ...Array(3).fill(firstPage), ['Article title', left, right, 'Closing note', caption],
     ]);
     assert(await evaluate('document.querySelector("#lines").textContent.includes("译 Ordinary prose")'));
     await evaluate('window.pdfHold = "Fourth page prose"; document.querySelector("#next").click()');
@@ -168,6 +181,19 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await navigate('/pdf.html?local=allow#9');
     await hasStatus('第 1 页已就绪');
     assert(await evaluate('window.fileRead && window.localSlices >= 2'));
+    await navigate('/pdf.html?fallback=1#9');
+    await hasStatus('第 1 页已就绪');
+    await evaluate('document.querySelector("#translate").click()');
+    await hasStatus('第 1 页翻译完成');
+    assert(await evaluate('document.querySelector("#lines").textContent.replace(/\\s+/g, " ").includes("译 Let a + b 译 and c + d 译 be positive")'));
+    assert(await evaluate('document.querySelector("#lines .pdf-inline-math sup")?.textContent === "2" && !document.querySelector("#lines").textContent.includes("ARF")'));
+    assert.deepEqual(await evaluate('pdfBatches[1].map(item => item.text.trim())'),
+      ['function', 'is smooth on this interval.', 'The result is', 'with modest error.', 'Let', 'and', 'be positive']);
+    await navigate('/pdf.html?reorder=1#9');
+    await hasStatus('第 1 页已就绪');
+    await evaluate('document.querySelector("#translate").click()');
+    await hasStatus('第 1 页翻译完成');
+    assert(await evaluate('document.querySelector("#lines").textContent.includes("译 先 c + d，再 a + b")'));
     await navigate('/pdf.html?path=/bad.pdf#9');
     await hasStatus('分段读取失败');
     await navigate('/pdf.html?path=/whole.pdf#9');
