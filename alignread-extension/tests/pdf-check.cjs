@@ -24,8 +24,9 @@ function mockViewer(origin) {
   const params = new URLSearchParams(location.search);
   const fileUrl = 'file:///fixture.pdf';
   const fixtureUrl = location.origin + (params.get('path') || '/fixture.pdf');
+  const sourceUrl = fixtureUrl + (params.has('start') ? '#page=' + params.get('start') : '');
   let tab = params.has('pending') ? { pendingUrl: fixtureUrl, status: 'loading' } :
-    { url: params.has('local') ? fileUrl : fixtureUrl, status: 'complete' };
+    { url: params.has('local') ? fileUrl : sourceUrl, status: 'complete' };
   chrome.tabs.get = async () => tab;
   const tabListeners = new Set();
   window.updatePdfTab = (change, next = {}) => {
@@ -107,18 +108,28 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
   const root = path.resolve(build);
   const pdf = Buffer.from(fixturePdf());
   const ranges = [];
+  const fullReads = new Map();
   const server = http.createServer(async (req, res) => {
     try {
       const route = new URL(req.url, 'http://localhost').pathname;
-      if (route === '/fixture.pdf' || route === '/bad.pdf') {
+      if (['/fixture.pdf', '/bad.pdf', '/range-rejected.pdf', '/unreadable.pdf'].includes(route)) {
         const range = /^bytes=(\d+)-(\d+)$/.exec(req.headers.range ?? '');
-        if (!range) { res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(pdf); return; }
+        if (!range) {
+          fullReads.set(route, (fullReads.get(route) ?? 0) + 1);
+          if (route === '/unreadable.pdf') res.writeHead(503).end();
+          else res.writeHead(200, { 'Content-Type': 'application/pdf' }).end(pdf);
+          return;
+        }
+        if (route === '/range-rejected.pdf') {
+          res.writeHead(416, { 'Content-Range': 'bytes */' + pdf.length }).end();
+          return;
+        }
         const start = Number(range[1]), end = Math.min(pdf.length - 1, Number(range[2]));
         ranges.push([start, end]);
         const body = pdf.subarray(start, end + 1);
         res.writeHead(206, {
           'Content-Type': 'application/pdf',
-          'Content-Range': 'bytes ' + (route === '/bad.pdf' && start ? 0 : start) + '-' + end + '/' + pdf.length,
+          'Content-Range': 'bytes ' + (['/bad.pdf', '/unreadable.pdf'].includes(route) && start ? 0 : start) + '-' + end + '/' + pdf.length,
           'Content-Length': body.length,
         }).end(body);
         return;
@@ -370,10 +381,18 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('window.pdfEcho = false; document.querySelector("#translate").click()');
     await hasStatus('第 1 页翻译完成');
     assert.deepEqual(await evaluate('pdfBatches[1].map(item => item.text)'), ['Research for AI + Science remains useful.']);
-    await navigate('/pdf.html?path=/bad.pdf#9');
-    await hasStatus('分段读取失败');
+    await navigate('/pdf.html?path=/bad.pdf&start=4#9');
+    await hasStatus('第 4 页已就绪');
+    assert.equal(fullReads.get('/bad.pdf'), 1);
+    assert.equal(await evaluate('document.querySelector("#page").value'), '4');
+    await navigate('/pdf.html?path=/unreadable.pdf#9');
+    await hasStatus('分段读取和完整读取均失败');
+    assert.equal(fullReads.get('/unreadable.pdf'), 1);
     await navigate('/pdf.html?path=/whole.pdf#9');
     await hasStatus('第 1 页已就绪');
+    await navigate('/pdf.html?path=/range-rejected.pdf#9');
+    await hasStatus('第 1 页已就绪');
+    assert.equal(fullReads.get('/range-rejected.pdf'), 1);
     for (const suffix of ['', '?pending=1#9']) {
       await navigate('/pdf.html' + suffix);
       await until(() => evaluate('Boolean(document.querySelector("#file")?.onchange)'));

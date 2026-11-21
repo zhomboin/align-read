@@ -161,20 +161,18 @@ function clearDocument() {
   controls();
 }
 
-async function load(inputFile: PdfInput, beside = false, startPage = 1) {
+async function load(inputFile: PdfInput, beside = false, startPage = 1, wholeFile = false) {
   clearDocument();
   documentLife = new AbortController();
   const signal = documentLife.signal;
   requestedPage = startPage;
   viewport.classList.toggle('beside-original', beside);
   hostname = inputFile instanceof URL ? inputFile.hostname : '';
-  status.textContent = '正在打开 PDF…';
+  status.textContent = wholeFile ? '分段读取失败，正在完整读取 PDF…' : '正在打开 PDF…';
   try {
-    const doc = await openDocument(inputFile, signal, (error) => {
-      if (signal.aborted) return;
-      clearDocument();
-      status.textContent = error.message;
-    });
+    const doc = await openDocument(inputFile, signal, () => {
+      if (!signal.aborted && !wholeFile) void load(inputFile, beside, view?.page ?? requestedPage, true);
+    }, wholeFile);
     if (signal.aborted) return;
     pdf = doc;
     queue = new PdfTranslationQueue(doc.numPages, async page => (await getModel(doc, page)).content.items, updateTranslation);
@@ -189,8 +187,10 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
       }, page => updateTranslation(page === view?.page));
     goToPage(requestedPage);
   } catch (error) {
-    if (!signal.aborted) status.textContent = error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
+    if (signal.aborted) return;
+    const reason = error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
       ? error.message : '无法打开 PDF。请确认文件完整，网页文件可下载后重新选择。';
+    status.textContent = (wholeFile ? '分段读取和完整读取均失败。' : '') + reason;
   }
 }
 
