@@ -55,7 +55,9 @@ export async function pageLines(page: PDFPageProxy) {
       bottom = Math.min(bottom, y - size * .25); top = Math.max(top, y + size);
       const font = page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName) : undefined;
       if (item.str.trim()) {
-        const names = (font?.name ?? '') + ' ' + (styles[item.fontName]?.fontFamily ?? '');
+        const style = styles[item.fontName];
+        const names = (font?.name ?? '') + ' ' + (style?.fontFamily ?? '');
+        const math = mathFont.test(names);
         rotated ||= Math.abs(item.transform[1]) > .01;
         if (/\p{L}/u.test(item.str)) {
           textWidth += item.width;
@@ -65,9 +67,19 @@ export async function pageLines(page: PDFPageProxy) {
             if (!sawRegular) labelEnd = text.trimEnd().length;
           } else sawRegular = true;
         }
+        const slack = size * (math ? .10 : .05);
+        const ascent = style?.ascent ?? .82;
+        // Extensible symbols such as a display-sized sum can extend far below
+        // the font's line descent when their baseline is near the top.
+        const descent = math && ascent < .15 && font?.bbox
+          ? Math.min(style?.descent ?? -.24, font.bbox[1] / 1000) : style?.descent ?? -.24;
+        const ink: PdfBounds = [
+          x - slack, y + size * descent - slack,
+          x + item.width + slack, y + size * ascent + slack,
+        ];
         runs.push({
           start, end: text.length, text: item.str, baseline: y, size,
-          math: mathFont.test(names), code: codeFont.test(names), bounds: [x, y - size * .25, x + item.width, y + size]
+          math, code: codeFont.test(names), bounds: [x, y - size * .25, x + item.width, y + size], ink,
         });
       }
     }
@@ -125,7 +137,8 @@ export async function pageLines(page: PDFPageProxy) {
   return mergeInlineFragments(lines);
 }
 
-export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number, inline = false) {
+export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number, inline?: { ink?: PdfBounds[] }) {
+  if (inline?.ink?.length === 0) return document.createTextNode(line.text);
   const viewport = page.getViewport({ scale });
   const [left, bottom, right, top] = line.bounds;
   const [x1, y1] = viewport.convertToViewportPoint(left, bottom);
@@ -149,6 +162,16 @@ export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDF
   if (line.graphic) crop.className = 'pdf-graphic';
   crop.setAttribute('role', 'img');
   crop.setAttribute('aria-label', line.text);
-  crop.getContext('2d')!.drawImage(canvas, x, y, width, height, 0, 0, width, height);
+  const context = crop.getContext('2d')!;
+  if (inline?.ink?.length) {
+    context.beginPath();
+    for (const [l, b, r, t] of inline.ink) {
+      const [ax, ay] = viewport.convertToViewportPoint(l, b);
+      const [bx, by] = viewport.convertToViewportPoint(r, t);
+      context.rect(Math.min(ax, bx) - x, Math.min(ay, by) - y, Math.abs(ax - bx), Math.abs(ay - by));
+    }
+    context.clip();
+  }
+  context.drawImage(canvas, x, y, width, height, 0, 0, width, height);
   return crop;
 }

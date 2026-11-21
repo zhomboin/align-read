@@ -62,6 +62,7 @@ function fixturePdf() {
     text(285, 54, '\\(5.2\\)'),
   ].join('\n');
   const inlineFraction = [
+    'q 1 0 0 rg ' + text(128, 135, 'gyp text on the neighboring line', 12) + ' Q',
     text(20, 119, 'Before the fraction f ='), text(142, 125, 'u + v', 8),
     text(139, 114, '1 + uv', 8), text(167, 119, 'and its value stays finite.'),
     '139 122 m 164 122 l S',

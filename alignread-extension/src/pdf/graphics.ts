@@ -82,11 +82,12 @@ function tablesWithHorizontalRules(rules: PdfBounds[], lines: PdfLine[]) {
   return tables;
 }
 
-export function graphicRegions(list: PDFOperatorList, page: PdfBounds, lines: PdfLine[]) {
+export function pageGraphics(list: PDFOperatorList, page: PdfBounds, lines: PdfLine[]) {
   type Form = { region?: PdfBounds; start: number; paint: number };
   type State = { matrix: number[]; form?: Form };
   const figures: PdfBounds[] = [];
   const horizontal: PdfBounds[] = [], vertical: PdfBounds[] = [];
+  const thinRules: PdfBounds[] = [];
   const stack: State[] = [];
   let state: State = { matrix: identity };
   const transform = (bounds: ArrayLike<number>, matrix = state.matrix) => {
@@ -128,6 +129,8 @@ export function graphicRegions(list: PDFOperatorList, page: PdfBounds, lines: Pd
         const box = transform(args[2]);
         // Record drawing evidence on the form even when the path is inside a saved graphics state.
         if (state.form) state.form.paint++;
+        if (thinRules.length < 512 && width(box) >= 2 && height(box) >= 0 && height(box) <= 1.5 &&
+          height(box) <= width(box) * .12) thinRules.push(box);
         if (horizontal.length + vertical.length >= 256) break;
         if (width(box) >= 30 && height(box) >= 0 && height(box) <= 2) horizontal.push(box);
         if (height(box) >= 12 && width(box) >= 0 && width(box) <= 2) vertical.push(box);
@@ -149,5 +152,5 @@ export function graphicRegions(list: PDFOperatorList, page: PdfBounds, lines: Pd
       return width(overlap) > width(box) * .95 && height(overlap) > height(box) * .95;
     })) regions.push(box);
   }
-  return regions;
+  return { regions, thinRules };
 }

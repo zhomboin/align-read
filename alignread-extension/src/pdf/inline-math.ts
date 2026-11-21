@@ -1,8 +1,9 @@
 import type { PdfBounds } from './page-content';
+import { enclosingBounds, inlineInk } from './inline-ink';
 
 type Range = { start: number; end: number };
-type Position = { bounds: PdfBounds; baseline: number; size: number };
-export type TextRun = Range & Position & { text: string; math: boolean; code: boolean };
+type Position = { bounds: PdfBounds; baseline: number; size: number; ink?: PdfBounds[] };
+export type TextRun = Range & Omit<Position, 'ink'> & { text: string; math: boolean; code: boolean; ink: PdfBounds };
 type Script = Range & { kind: 'sup' | 'sub' };
 export type InlineMath = Range & { position?: Position; scripts?: Script[]; leading?: boolean };
 
@@ -60,11 +61,9 @@ export function inlineMath(text: string, runs: TextRun[], proseRun = mainTextRun
     if (!proseRun || !glyphs.length || glyphs.some(run => /\S/.test(run.text.slice(0, Math.max(0, start - run.start))) ||
       (run.end > end && /\S/.test(run.text.slice(end - run.start))))) return { start, end, scripts: spanScripts };
 
-    const bounds: PdfBounds = [
-      Math.min(...glyphs.map(run => run.bounds[0])), Math.min(...glyphs.map(run => run.bounds[1])),
-      Math.max(...glyphs.map(run => run.bounds[2])), Math.max(...glyphs.map(run => run.bounds[3])),
-    ];
-    return { start, end, scripts: spanScripts, position: { bounds, baseline: proseRun.baseline, size: proseRun.size } };
+    const bounds = enclosingBounds(glyphs.map(run => run.bounds));
+    const ink = inlineInk(glyphs.map(run => run.ink));
+    return { start, end, scripts: spanScripts, position: { bounds, ink, baseline: proseRun.baseline, size: proseRun.size } };
   });
 }
 

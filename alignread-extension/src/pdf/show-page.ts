@@ -1,7 +1,8 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { AnnotationMode } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { originalLine, pageLines, type PdfBounds } from './page-content';
-import { graphicRegions } from './graphics';
+import { pageGraphics } from './graphics';
+import { includeInlineRules } from './inline-ink';
 import { pageLayout, type PdfBand } from './page-layout';
 import { mathPlaceholders, type PdfTranslationItem } from './math-placeholders';
 
@@ -14,7 +15,9 @@ export async function readPage(page: PDFPageProxy): Promise<PageContent> {
   const pageBounds = page.view as PdfBounds;
   const pageArea = (pageBounds[2] - pageBounds[0]) * (pageBounds[3] - pageBounds[1]);
   // A scanned sheet can have an OCR text layer over a full-page raster image.
-  const regions = graphicRegions(operators, pageBounds, lines).filter(([x1, y1, x2, y2]) =>
+  const graphics = pageGraphics(operators, pageBounds, lines);
+  includeInlineRules(lines, graphics.thinRules);
+  const regions = graphics.regions.filter(([x1, y1, x2, y2]) =>
     !lines.length || (x2 - x1) * (y2 - y1) < pageArea * .72);
   const bands = pageLayout([
     ...lines.filter(({ bounds: [x1, y1, x2, y2] }) => !regions.some(([left, bottom, right, top]) => {
@@ -76,7 +79,7 @@ function translationRow(node: HTMLElement, item: PdfTranslationItem, page: PDFPa
       span.textContent = math;
     } else if (position && image) {
       const { bounds, baseline, size } = position;
-      const crop = originalLine(image.canvas, { bounds, text: math, keep: true }, page, image.scale, true);
+      const crop = originalLine(image.canvas, { bounds, text: math, keep: true }, page, image.scale, position);
       if (crop instanceof HTMLCanvasElement) {
         crop.style.width = crop.width / (size * image.scale) + 'em';
         crop.style.verticalAlign = (bounds[1] - baseline - 2 / image.scale) / size + 'em';

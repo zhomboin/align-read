@@ -1,4 +1,5 @@
 import type { InlineMath, TextRun } from './inline-math';
+import { enclosingBounds, inlineInk } from './inline-ink';
 import type { PdfBounds, PdfLine } from './page-content';
 
 type Fragment = PdfLine & { runs: TextRun[] };
@@ -47,51 +48,55 @@ function sameTextRow(left: PdfLine, right: PdfLine) {
     gap >= -size * (mathAtSeam ? 2.2 : .25) && gap <= size * .75;
 }
 
-function sliceBounds(line: Fragment, start: number, end: number) {
+function sliceRuns(line: Fragment, start: number, end: number) {
   return line.runs.flatMap(run => {
     if (run.end <= start || run.start >= end) return [];
     const [left, bottom, right, top] = run.bounds;
     const advance = (right - left) / (run.end - run.start);
-    return [[left + Math.max(0, start - run.start) * advance, bottom,
-    right - Math.max(0, run.end - end) * advance, top] as PdfBounds];
+    const x1 = left + Math.max(0, start - run.start) * advance;
+    const x2 = right - Math.max(0, run.end - end) * advance;
+    return [{
+      bounds: [x1, bottom, x2, top] as PdfBounds,
+      ink: [start <= run.start ? run.ink[0] : x1, run.ink[1], end >= run.end ? run.ink[2] : x2, run.ink[3]] as PdfBounds,
+    }];
   });
-}
-
-function enclosing(boxes: PdfBounds[]): PdfBounds {
-  return [
-    Math.min(...boxes.map(box => box[0])), Math.min(...boxes.map(box => box[1])),
-    Math.max(...boxes.map(box => box[2])), Math.max(...boxes.map(box => box[3])),
-  ];
 }
 
 function combine(parts: Fragment[], head: RegExpMatchArray | undefined, tail: RegExpMatchArray | undefined): PdfLine | undefined {
   const first = parts[0]!, last = parts.at(-1)!;
-  const start = head ? head.index! + head[0].length : 0;
-  const stop = tail?.index ?? last.text.length;
+  const headEnd = head ? head.index! + head[0].length : 0;
+  const start = headEnd + (head ? first.text.slice(headEnd).match(/^[\s,;:]+/u)?.[0].length ?? 0 : 0);
+  const stop = tail ? last.text.slice(0, tail.index).replace(/[\s,.;:]+$/u, '').length : last.text.length;
   const before = first.text.slice(0, start).trimEnd();
   const after = last.text.slice(stop);
   const equationParts = parts.map((part, index) => {
     const from = index === 0 ? start : 0;
     const to = index === parts.length - 1 ? stop : part.text.length;
-    return { text: part.text.slice(from, to).trim(), boxes: sliceBounds(part, from, to) };
+    return { text: part.text.slice(from, to).trim(), runs: sliceRuns(part, from, to) };
   });
   const formula = equationParts.map(part => part.text).filter(Boolean).join(' ');
   const body = head ? first : last;
   const reference = body.textLine;
-  const boxes = equationParts.flatMap(part => part.boxes);
-  if (!formula || !reference || !boxes.length) return;
+  const runs = equationParts.flatMap(part => part.runs);
+  if (!formula || !reference || !runs.length) return;
 
   const prefix = before ? before + ' ' : '';
-  const suffix = after ? ' ' + after : '';
+  const suffix = after && !/^[\s,.;:]/u.test(after) ? ' ' + after : after;
   const end = prefix.length + formula.length;
+  const offset = end + suffix.length - after.length - stop;
   const inline: InlineMath[] = [
     ...first.inline?.filter(span => span.end <= before.length) ?? [],
-    { start: prefix.length, end, position: { bounds: enclosing(boxes), baseline: reference.baseline, size: reference.size } },
+    {
+      start: prefix.length, end, position: {
+        bounds: enclosingBounds(runs.map(run => run.bounds)), ink: inlineInk(runs.map(run => run.ink)),
+        baseline: reference.baseline, size: reference.size,
+      },
+    },
     ...last.inline?.filter(span => span.start >= stop).map(span =>
-      ({ ...span, start: span.start + end + 1 - stop, end: span.end + end + 1 - stop })) ?? [],
+      ({ ...span, start: span.start + offset, end: span.end + offset })) ?? [],
   ];
   return {
-    text: prefix + formula + suffix, bounds: enclosing(parts.map(part => part.bounds)), keep: false,
+    text: prefix + formula + suffix, bounds: enclosingBounds(parts.map(part => part.bounds)), keep: false,
     math: true, inline, textWithoutMath: before + suffix, fontSize: body.fontSize, textLine: body.textLine,
     noteStart: body.noteStart, labelEnd: head ? body.labelEnd : undefined,
   };
@@ -106,7 +111,7 @@ function spansSeam(left: Fragment, right: Fragment, head: RegExpMatchArray, tail
 function joinProse(left: PdfLine, right: PdfLine): PdfLine {
   const offset = left.text.length + 1;
   return {
-    ...left, text: left.text + ' ' + right.text, bounds: enclosing([left.bounds, right.bounds]),
+    ...left, text: left.text + ' ' + right.text, bounds: enclosingBounds([left.bounds, right.bounds]),
     math: left.math || right.math,
     inline: [...left.inline ?? [], ...right.inline?.map(span =>
       ({ ...span, start: offset + span.start, end: offset + span.end })) ?? []],
@@ -132,7 +137,7 @@ export function mergeInlineFragments(lines: Fragment[]) {
     while (end + 1 < lines.length &&
       (adjacent(bounds, lines[end]!, lines[end + 1]!, baseline) || sameTextRow(lines[end]!, lines[end + 1]!))) {
       end++;
-      bounds = enclosing([bounds, lines[end]!.bounds]);
+      bounds = enclosingBounds([bounds, lines[end]!.bounds]);
       if (proseWords[end]!.length) break;
     }
     const tail = end > index ? proseWords[end]![0] : undefined;

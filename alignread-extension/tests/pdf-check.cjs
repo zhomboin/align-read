@@ -213,6 +213,22 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       const paragraph = [...document.querySelectorAll('.pdf-sheet[aria-current] .pdf-translation p')]
         .find(node => node.textContent.includes('Before the fraction'));
       const canvases = [...paragraph?.querySelectorAll('.pdf-inline-math canvas') ?? []];
+      const canvas = canvases[0];
+      const pixels = canvas?.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data ?? [];
+      let neighboringInk = 0;
+      let denominatorInk = 0;
+      let barInk = 0;
+      let darkRun = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        const row = Math.floor(i / (4 * canvas.width));
+        const column = i / 4 % canvas.width;
+        const dark = pixels[i + 3] > 200 && Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) < 160;
+        darkRun = dark ? (column === 0 ? 1 : darkRun + 1) : 0;
+        barInk = Math.max(barInk, darkRun);
+        if (pixels[i + 3] <= 200) continue;
+        if (pixels[i] > 220 && pixels[i] - Math.max(pixels[i + 1], pixels[i + 2]) > 125) neighboringInk++;
+        if (row > canvas.height * .76 && column > canvas.width * .45 && dark) denominatorInk++;
+      }
       const after = canvases[0]?.parentElement.nextSibling;
       const range = document.createRange();
       let continuesInline = false;
@@ -224,12 +240,15 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
         const formula = canvases[0].getBoundingClientRect();
         continuesInline = text.top < formula.bottom && text.bottom > formula.top;
       }
-      return { text: paragraph?.textContent, formulas: canvases.map(canvas => canvas.ariaLabel), continuesInline };
+      return { text: paragraph?.textContent, formulas: canvases.map(canvas => canvas.ariaLabel), continuesInline, neighboringInk, denominatorInk, barInk };
     })()`);
     assert.equal(fractionParagraph.formulas.length, 1);
     assert(fractionParagraph.formulas[0].includes('u + v') && fractionParagraph.formulas[0].includes('1 + uv'), JSON.stringify(fractionParagraph));
     assert(fractionParagraph.text.includes('and its value stays finite. The explanation continues in the same paragraph.'));
     assert(fractionParagraph.continuesInline);
+    assert.equal(fractionParagraph.neighboringInk, 0);
+    assert(fractionParagraph.denominatorInk > 8);
+    assert(fractionParagraph.barInk >= 47);
     await evaluate('window.pdfRelease()');
     await wheelToward(1);
     await hasStatus('第 1 页翻译完成');
