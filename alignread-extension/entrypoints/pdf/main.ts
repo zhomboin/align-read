@@ -1,13 +1,13 @@
 import { browser } from 'wxt/browser';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { openDocument, type PdfInput } from '../../src/pdf/document';
-import { originalLine, pageLines } from '../../src/pdf/page-content';
+import { displayPage, type TranslationRow } from '../../src/pdf/show-page';
 import { translatePage } from '../../src/pdf/translate';
 import { request } from '../../src/shared/extension';
-import { pdfAddress } from '../../src/shared/pdf-source';
+import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import {
   LANGUAGES, TRANSLATION_PROVIDERS, errors, selectedProviderAccess, type Language, type SourceLanguage,
-  type PublicSettings, type TranslationItem
+  type PublicSettings
 } from '../../src/shared/reader-messages';
 import './pdf.css';
 
@@ -38,7 +38,8 @@ let translation: AbortController | undefined;
 let number = 0;
 let hostname = '';
 let settings: PublicSettings | undefined;
-let rows: { p: HTMLElement; item: TranslationItem; done: boolean; }[] = [];
+let rows: TranslationRow[] = [];
+let besideOriginal = false;
 
 function controls() {
   prev.disabled = !pdf || number <= 1;
@@ -88,60 +89,52 @@ async function showPage(value: number) {
   try {
     const page = await doc.getPage(number);
     if (signal.aborted) return;
-    const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(2, 1600 / Math.max(base.width, base.height));
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
-    canvas.setAttribute('aria-label', 'PDF 原页 ' + number);
-    const render = page.render({ canvas, viewport });
-    const cancelRender = () => render.cancel();
-    signal.addEventListener('abort', cancelRender, { once: true });
-    try { await render.promise; }
-    finally { signal.removeEventListener('abort', cancelRender); }
-    if (signal.aborted) return;
-    original.replaceChildren(canvas);
-    const extracted = await pageLines(page);
-    if (signal.aborted) return;
-    for (const line of extracted) {
-      const p = document.createElement('p');
-      if (line.keep) p.append(originalLine(canvas, line, page, scale));
-      else {
-        p.textContent = line.text;
-        rows.push({ p, item: { id: 'line-' + rows.length, text: line.text }, done: false });
-      }
-      lines.append(p);
-    }
-    page.cleanup();
-    status.textContent = rows.length ? '第 ' + number + ' 页已就绪。点击翻译会向所选服务发送本页正文。'
-      : extracted.length ? '本页仅显示原文。' : '本页没有可提取的文字，已显示原页。扫描件需要先做 OCR。';
+    try {
+      const display = await displayPage(page, signal, !besideOriginal);
+      if (signal.aborted) return;
+      if (display.canvas) original.replaceChildren(display.canvas);
+      lines.replaceChildren(display.content);
+      rows = display.rows;
+      status.textContent = rows.length ? '第 ' + number + ' 页已就绪。点击翻译会向所选服务发送本页正文。'
+        : display.hasText ? '本页仅显示原文。' : '本页没有可提取的文字，扫描件需要先做 OCR。';
+    } finally { if (!signal.aborted) page.cleanup(); }
   } catch {
     if (!signal.aborted) status.textContent = '无法读取本页，请尝试其他页或重新选择文件。';
   } finally { if (!signal.aborted) controls(); }
 }
 
-async function load(inputFile: PdfInput) {
+function clearDocument() {
   documentLife.abort();
   pageLife.abort();
-  stopTranslation();
-  documentLife = new AbortController();
-  const signal = documentLife.signal;
   pdf = undefined;
   rows = [];
-  hostname = inputFile instanceof URL ? inputFile.hostname : '';
+  stopTranslation();
   columns.hidden = true;
-  original.replaceChildren(); lines.replaceChildren();
+  original.replaceChildren();
+  lines.replaceChildren();
   find('total').textContent = '';
-  controls();
+}
+
+async function load(inputFile: PdfInput, beside = false, startPage = 1) {
+  clearDocument();
+  documentLife = new AbortController();
+  const signal = documentLife.signal;
+  besideOriginal = beside;
+  columns.classList.toggle('beside-original', beside);
+  hostname = inputFile instanceof URL ? inputFile.hostname : '';
   status.textContent = '正在打开 PDF…';
   try {
-    const doc = await openDocument(inputFile, signal);
+    const doc = await openDocument(inputFile, signal, (error) => {
+      if (signal.aborted) return;
+      clearDocument();
+      status.textContent = error.message;
+    });
     if (signal.aborted) return;
     pdf = doc;
     input.max = String(doc.numPages);
     find('total').textContent = '/ ' + doc.numPages;
     columns.hidden = false;
-    await showPage(1);
+    await showPage(startPage);
   } catch (error) {
     if (!signal.aborted) status.textContent = error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
       ? error.message : '无法打开 PDF。请确认文件完整，网页文件可下载后重新选择。';
@@ -191,19 +184,36 @@ file.onchange = () => {
 };
 find('settings').onclick = () => void browser.runtime.openOptionsPage();
 window.addEventListener('focus', () => void readSettings());
-window.addEventListener('pagehide', () => { stopTranslation(); pageLife.abort(); documentLife.abort(); });
+window.addEventListener('pagehide', clearDocument);
 
 async function initialize() {
   const initialLife = documentLife;
   await readSettings(true);
   if (!/^#\d+$/.test(location.hash)) return;
-  const tab = await browser.tabs.get(Number(location.hash.slice(1))).catch(() => undefined);
-  const url = pdfAddress(tab?.url);
-  if (initialLife !== documentLife || !url) return;
-  if (url.protocol === 'file:') { status.textContent = '请选择当前本地 PDF 文件。'; return; }
+  const tabId = Number(location.hash.slice(1));
+  const tab = await browser.tabs.get(tabId).catch(() => undefined);
+  const url = await currentPdf(tabId, tab?.url);
+  const canRead = url && (url.protocol !== 'file:' || await browser.extension.isAllowedFileSchemeAccess());
+  if (initialLife !== documentLife || initialLife.signal.aborted) return;
+  if (!canRead) {
+    status.textContent = '请选择 PDF。要直接读取本地标签页，请在扩展详情中开启「允许访问文件网址」。';
+    return;
+  }
   if (settings?.disabledSites.some(site => url.hostname === site || url.hostname.endsWith('.' + site))) {
     status.textContent = errors['site-disabled']; return;
   }
-  void load(url);
+  const pageNumber = (address: URL) => Number(new URLSearchParams(address.hash.slice(1)).get('page')) || 1;
+  browser.tabs.onUpdated.addListener((id, change) => {
+    if (id !== tabId) return;
+    const updated = pdfAddress(change.url, true);
+    if (updated && updated.href.split('#')[0] === url.href.split('#')[0]) {
+      if (updated.hash && besideOriginal) void showPage(pageNumber(updated));
+    } else if (change.url || change.status === 'loading') {
+      clearDocument();
+      status.textContent = '标签页已更新，请重新打开 PDF 翻译。';
+      void browser.sidePanel.setOptions({ tabId, enabled: false }).catch(() => undefined);
+    }
+  });
+  void load(url, true, pageNumber(url));
 }
 void initialize();

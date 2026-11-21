@@ -29,10 +29,10 @@ const replacementOnly = process.argv.includes('--replace');
 const build = process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? path.resolve(__dirname, '../.output/chrome-mv3');
 const manifest = JSON.parse(fs.readFileSync(path.join(build, 'manifest.json'), 'utf8'));
 assert.equal(manifest.manifest_version, 3);
-assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage']);
+assert.deepEqual(manifest.permissions, ['activeTab', 'scripting', 'storage', 'sidePanel']);
 assert.deepEqual(manifest.optional_host_permissions,
   ['https://translation.googleapis.com/*', 'https://openapi.youdao.com/*', 'https://*/*']);
-assert.equal(manifest.host_permissions, undefined);
+assert.deepEqual(manifest.host_permissions, ['file:///*']);
 assert.equal(manifest.content_scripts, undefined);
 assert.deepEqual(manifest.options_ui, {open_in_tab: true, page: 'options.html'});
 const googleOrigin = 'https://translation.googleapis.com/*';

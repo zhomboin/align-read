@@ -17,7 +17,7 @@
 
 默认模式为双栏对照，自动检测源语言并译为简体中文。默认范围包含可滚动页面中可读的导航、侧栏、正文和页脚。用户可切换为仅正文。
 
-后续 P1 包括原文下方插入译文及句子级对齐。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。PDF 在独立扩展页由随包分发的 PDF.js 解析，网页注入仍受浏览器内部页、iframe 和 Canvas 边界限制。
+后续 P1 包括原文下方插入译文及句子级对齐。P2 包括词组对齐、扩展 Provider 支持、浏览器内翻译、复杂文档专项适配及个性化规则。PDF 在标签页侧边栏或手选文件的独立扩展页中由随包分发的 PDF.js 解析，网页注入仍受浏览器内部页、iframe 和 Canvas 边界限制。
 
 ## 2. 技术基线与代码结构
 
@@ -122,7 +122,7 @@ Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、
 - **AI 请求。** 服务目录定义显示名称、默认模型和允许使用的接口地址。请求策略复用 Chat Completions 的请求和响应处理，可为指定模型调整推理或 JSON 参数、为流式服务接入专用解析器。 [服务目录](../alignread-extension/src/shared/ai-settings.ts) · [请求策略](../alignread-extension/src/background/translation/ai-strategies.ts)
 - **AI 响应。** DeepSeek 使用 JSON 输出模式。MiniMax、GLM 和 Kimi 使用流式响应。后台跳过推理内容，拼接译文片段后再校验。流式请求等待首次响应或连续无数据的时限为 27 秒，单次请求最多 90 秒。Worker 用批次内临时序号匹配译文，要求每个序号恰好出现一次且译文非空。修改当前服务的端点、模型或密钥后，重新开启双栏和选词。 [AI 适配器](../alignread-extension/src/background/translation/ai.ts) · [DeepSeek JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [MiniMax 流式响应](https://platform.minimax.io/docs/api-reference/text-openai-api#streaming-response)
 - **缓存。** Reader 在当前路径或哈希路由内按规范化待译文本复用结果，语言方向、Provider 和配置版本由会话绑定。最近译文缓存最多 750 项或约 256 KB，敏感页面跳过缓存。设置页可关闭、查看估算占用和清空。换到其他路径或哈希路由时清空缓存，旧批次无法写回。
-- **页面权限。** 基础权限采用 `activeTab`、`scripting`、`storage`，点击后只注入支持的顶层文档。站点禁用先于注入检查，受限页面显示不可用原因。
+- **页面权限。** 使用 `activeTab`、`scripting` 和 `storage` 管理网页翻译，`sidePanel` 用于在 PDF 旁显示译文。`file:///*` 受 Chrome 的文件网址开关控制，仅在用户打开对应 PDF 时读取该文件。站点禁用先于注入检查，受限页面显示不可用原因。
 - **外发权限。** Worker 每批次检查当前服务的授权和配置。Google、有道和官方 AI 预设使用固定 HTTPS 接口，MiniMax 的接口随所选站点变化，自定义 AI 使用用户填写的地址。保存并同意外发时仅申请对应主机的可选权限，与网页的临时访问权限独立。页面消息无法指定服务地址，请求不跟随重定向。页面 URL、Cookies、表单内容及 DOM 不进入外发请求。密钥保存在受信任的扩展存储中，设置摘要返回配置状态、公开字段及脱敏信息。 [Chrome 可选权限](https://developer.chrome.com/docs/extensions/reference/api/permissions)
 
 ## 6. 实施与验收
