@@ -7,8 +7,8 @@ import { PdfContinuousView } from '../../src/pdf/continuous-view';
 import { request } from '../../src/shared/extension';
 import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import {
-  LANGUAGES, TRANSLATION_PROVIDERS, errors, isRecord, selectedProviderAccess, type Language, type SourceLanguage,
-  type PublicSettings
+  LANGUAGES, TRANSLATION_PROVIDERS, errors, isRecord, selectedProviderAccess, type ErrorCode, type Language,
+  type PublicSettings, type SourceLanguage,
 } from '../../src/shared/reader-messages';
 import './pdf.css';
 
@@ -37,9 +37,16 @@ let view: PdfContinuousView | undefined;
 let queue: PdfTranslationQueue | undefined;
 let hostname = '';
 let settings: PublicSettings | undefined;
+let settingsError: ErrorCode | undefined;
 let settingsRequest = 0;
+let languageEdited = false;
+let requestedPage = 1;
+const tabLife = new AbortController();
 const models = new Map<number, Promise<{ page: PDFPageProxy; content: PageContent }>>();
-let besideOriginal = false;
+
+function siteDisabled() {
+  return settings?.disabledSites.some(site => hostname === site || hostname.endsWith('.' + site));
+}
 
 function controls() {
   const number = view?.page ?? 0;
@@ -49,7 +56,7 @@ function controls() {
   input.disabled = !pdf;
   const job = queue?.translatingPage;
   const canStart = model && (model.items.length > 0 || (pdf && number < pdf.numPages));
-  translate.disabled = !settings || !canStart || Boolean(queue?.enabled) ||
+  translate.disabled = !settings || siteDisabled() || !canStart || Boolean(queue?.enabled) ||
     Boolean(queue?.result(number)?.complete && !queue.error && !hasPendingPages());
   cancel.hidden = !queue?.enabled;
   cancel.textContent = job ? '停止翻译' : '停止预译';
@@ -84,24 +91,28 @@ function updateTranslation(showStatus = true) {
         : job === number ? '正在翻译第 ' + number + ' 页…' : '第 ' + number + ' 页已就绪。';
   }
   const error = queue?.error ? '第 ' + queue.failedPage + ' 页：' + queue.error : '';
+  const settingsNotice = siteDisabled() ? errors['site-disabled'] : settingsError ? errors[settingsError] : '';
   const message = pageStatus + (job !== undefined && job !== number ? ' 正在预译第 ' + job + ' 页…' : '') +
-    (error ? ' ' + error : '');
+    (error ? ' ' + error : '') + (settingsNotice ? ' ' + settingsNotice : '');
   if (status.textContent !== message) status.textContent = message;
 }
 
-async function readSettings(initial = false, credentialsChanged = false) {
+async function readSettings(credentialsChanged = false) {
   const sequence = ++settingsRequest;
   const result = await request<PublicSettings>({ type: 'settings' });
   if (sequence !== settingsRequest) return;
+  const hadNotice = settingsError || siteDisabled();
+  settingsError = result.ok ? undefined : result.error;
   if (result.ok) {
     const next = result.value;
+    if (!settings && !languageEdited) { source.value = next.source; target.value = next.target; }
     const reset = settings && (credentialsChanged || settings.provider !== next.provider || !selectedProviderAccess(next).authorized);
     settings = next;
     if (reset) queue?.reset();
-    if (next.disabledSites.some(site => hostname === site || hostname.endsWith('.' + site))) queue?.stop();
-    if (initial) { source.value = settings.source; target.value = settings.target; }
-  } else status.textContent = errors[result.error];
-  controls();
+    if (siteDisabled()) queue?.stop();
+  }
+  if (hadNotice || settingsError || siteDisabled()) updateTranslation();
+  else controls();
 }
 
 function getModel(doc: PDFDocumentProxy, pageNumber: number) {
@@ -124,7 +135,8 @@ function getModel(doc: PDFDocumentProxy, pageNumber: number) {
 }
 
 function goToPage(value: number) {
-  view?.goTo(value);
+  requestedPage = value;
+  view?.goTo(requestedPage);
   if (view) input.value = String(view.page);
 }
 
@@ -146,13 +158,14 @@ function clearDocument() {
   queue = undefined;
   viewport.hidden = true;
   find('total').textContent = '';
+  controls();
 }
 
 async function load(inputFile: PdfInput, beside = false, startPage = 1) {
   clearDocument();
   documentLife = new AbortController();
   const signal = documentLife.signal;
-  besideOriginal = beside;
+  requestedPage = startPage;
   viewport.classList.toggle('beside-original', beside);
   hostname = inputFile instanceof URL ? inputFile.hostname : '';
   status.textContent = '正在打开 PDF…';
@@ -174,7 +187,7 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
         if (document.activeElement !== input) input.value = String(page);
         queue?.select(page);
       }, page => updateTranslation(page === view?.page));
-    goToPage(startPage);
+    goToPage(requestedPage);
   } catch (error) {
     if (!signal.aborted) status.textContent = error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
       ? error.message : '无法打开 PDF。请确认文件完整，网页文件可下载后重新选择。';
@@ -182,7 +195,7 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1) {
 }
 
 translate.onclick = () => {
-  if (!queue || queue.enabled || !settings) return;
+  if (!queue || queue.enabled || !settings || siteDisabled()) return;
   const { configured, authorized } = selectedProviderAccess(settings);
   if (!configured || !authorized) {
     status.textContent = errors[configured ? 'consent-required' : 'not-configured'];
@@ -195,7 +208,11 @@ translate.onclick = () => {
   });
 };
 cancel.onclick = () => { queue?.stop(); status.textContent = '已停止翻译。'; };
-source.onchange = target.onchange = () => { queue?.reset(); status.textContent = '语言已更新。'; };
+source.onchange = target.onchange = () => {
+  languageEdited = true;
+  queue?.reset();
+  status.textContent = '语言已更新。';
+};
 prev.onclick = () => { if (view) goToPage(view.page - 1); };
 next.onclick = () => { if (view) goToPage(view.page + 1); };
 input.onchange = () => goToPage(input.valueAsNumber);
@@ -203,7 +220,10 @@ input.onblur = () => { if (view) input.value = String(view.page); };
 file.onchange = () => {
   const selected = file.files?.[0];
   file.value = '';
-  if (selected) void load(selected);
+  if (selected) {
+    tabLife.abort();
+    void load(selected);
+  }
 };
 find('settings').onclick = () => void browser.runtime.openOptionsPage();
 window.addEventListener('focus', () => void readSettings());
@@ -213,43 +233,68 @@ browser.storage.onChanged.addListener((changes, area) => {
     const revision = (value: unknown) => isRecord(value) ? value.revision : undefined;
     const changed = revision(provider.newValue) !== revision(provider.oldValue);
     if (changed) queue?.reset();
-    void readSettings(false, changed);
+    void readSettings(changed);
   }
 });
-window.addEventListener('pagehide', clearDocument);
+window.addEventListener('pagehide', () => {
+  tabLife.abort();
+  clearDocument();
+});
 
-async function initialize() {
-  const initialLife = documentLife;
-  await readSettings(true);
-  if (!/^#\d+$/.test(location.hash)) return;
-  const tabId = Number(location.hash.slice(1));
-  const tab = await browser.tabs.get(tabId).catch(() => undefined);
-  const url = await currentPdf(tabId, tab?.url);
-  const canRead = url && (url.protocol !== 'file:' || await browser.extension.isAllowedFileSchemeAccess());
-  if (initialLife !== documentLife || initialLife.signal.aborted) return;
-  if (!canRead) {
-    status.textContent = '请选择 PDF。要直接读取本地标签页，请在扩展详情中开启「允许访问文件网址」。';
-    return;
+function pageNumber(address: URL) {
+  const page = Number(new URLSearchParams(address.hash.slice(1)).get('page'));
+  return Number.isInteger(page) && page > 0 ? page : undefined;
+}
+
+async function followTab(tabId: number) {
+  type TabUpdated = Parameters<typeof browser.tabs.onUpdated.addListener>[0];
+  type Tab = Parameters<TabUpdated>[2];
+  let documentUrl: string | undefined;
+  let revision = 0;
+  status.textContent = '正在识别当前标签页的 PDF…';
+
+  async function resolveDocument(tab: Tab | undefined, url = tab?.url) {
+    const attempt = ++revision;
+    const pending = tab?.pendingUrl && tab.pendingUrl !== url;
+    const address = pending ? undefined : await currentPdf(tabId, url);
+    const allowed = address?.protocol !== 'file:' ||
+      await browser.extension.isAllowedFileSchemeAccess().catch(() => false);
+    if (tabLife.signal.aborted || attempt !== revision) return;
+    if (!address) {
+      status.textContent = pending || tab?.status === 'loading' ? '正在等待当前标签页的 PDF…' : '请从 PDF 标签页打开对照阅读，或选择 PDF 文件。';
+    } else if (!allowed) {
+      status.textContent = '请选择 PDF。要直接读取本地标签页，请在扩展详情中开启「允许访问文件网址」。';
+    } else {
+      documentUrl = address.href.split('#')[0];
+      void load(address, true, pageNumber(address) ?? 1);
+    }
   }
-  if (settings?.disabledSites.some(site => url.hostname === site || url.hostname.endsWith('.' + site))) {
-    status.textContent = errors['site-disabled']; return;
-  }
-  const pageNumber = (address: URL) => {
-    const page = Number(new URLSearchParams(address.hash.slice(1)).get('page'));
-    return Number.isInteger(page) && page > 0 ? page : undefined;
-  };
-  browser.tabs.onUpdated.addListener((id, change) => {
-    if (id !== tabId) return;
-    const updated = pdfAddress(change.url, true);
-    if (updated && updated.href.split('#')[0] === url.href.split('#')[0]) {
-      const page = pageNumber(updated);
-      if (page && besideOriginal) goToPage(page);
-    } else if (change.url || change.status === 'loading') {
+
+  const onUpdated: TabUpdated = (id, change, tab) => {
+    if (id !== tabId || (change.url === undefined && change.status === undefined)) return;
+    const url = change.url ?? tab.url;
+    if (!documentUrl) {
+      void resolveDocument(tab, url);
+      return;
+    }
+    // A cross-origin navigation can revoke activeTab before Chrome sends the final update.
+    if (!url && change.status !== 'complete') return;
+    const address = pdfAddress(url, true);
+    if (address?.href.split('#')[0] !== documentUrl) {
+      tabLife.abort();
       clearDocument();
       status.textContent = '标签页已更新，请重新打开 PDF 翻译。';
       void browser.sidePanel.setOptions({ tabId, enabled: false }).catch(() => undefined);
+    } else if (change.url) {
+      const page = pageNumber(address);
+      if (page) goToPage(page);
     }
-  });
-  void load(url, true, pageNumber(url) ?? 1);
+  };
+  browser.tabs.onUpdated.addListener(onUpdated);
+  tabLife.signal.addEventListener('abort', () => browser.tabs.onUpdated.removeListener(onUpdated), { once: true });
+  const tab = await browser.tabs.get(tabId).catch(() => undefined);
+  if (!tabLife.signal.aborted && revision === 0) await resolveDocument(tab);
 }
-void initialize();
+
+if (/^#\d+$/.test(location.hash)) void followTab(Number(location.hash.slice(1)));
+void readSettings();

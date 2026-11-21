@@ -8,7 +8,10 @@ const { fixturePdf } = require('./pdf-fixture.cjs');
 function mockViewer(origin) {
   if (location.origin !== origin) return;
   if (location.pathname === '/popup.html') {
-    chrome.tabs.query = async () => [{ id: 9, url: location.origin + '/fixture.pdf' }];
+    const url = location.origin + '/fixture.pdf';
+    chrome.tabs.query = async () => [location.search
+      ? { id: 9, pendingUrl: url, status: 'loading' }
+      : { id: 9, url, status: 'complete' }];
     chrome.tabs.create = () => { throw new Error('Unexpected new tab'); };
     chrome.sidePanel = {
       setOptions: async options => { window.panelOptions = options; },
@@ -20,8 +23,19 @@ function mockViewer(origin) {
   window.pdfBatches = [];
   const params = new URLSearchParams(location.search);
   const fileUrl = 'file:///fixture.pdf';
-  chrome.tabs.get = async () => ({ url: params.has('local') ? fileUrl : location.origin + (params.get('path') || '/fixture.pdf') });
-  chrome.tabs.onUpdated = { addListener(fn) { window.tabUpdated = fn; } };
+  const fixtureUrl = location.origin + (params.get('path') || '/fixture.pdf');
+  let tab = params.has('pending') ? { pendingUrl: fixtureUrl, status: 'loading' } :
+    { url: params.has('local') ? fileUrl : fixtureUrl, status: 'complete' };
+  chrome.tabs.get = async () => tab;
+  const tabListeners = new Set();
+  window.updatePdfTab = (change, next = {}) => {
+    tab = { ...tab, ...change, ...next };
+    for (const listener of tabListeners) listener(9, change, tab);
+  };
+  chrome.tabs.onUpdated = {
+    addListener(fn) { tabListeners.add(fn); window.pdfTabWatching = true; },
+    removeListener(fn) { tabListeners.delete(fn); },
+  };
   chrome.sidePanel = { async setOptions(options) { window.panelOptions = options; } };
   chrome.extension = { async isAllowedFileSchemeAccess() { return params.get('local') === 'allow'; } };
   const open = XMLHttpRequest.prototype.open;
@@ -31,6 +45,12 @@ function mockViewer(origin) {
   };
   const nativeFetch = window.fetch;
   window.fetch = (input, init) => {
+    if (params.has('hold-pdf') && String(input) === fixtureUrl && !window.pdfFetchStarted) {
+      window.pdfFetchStarted = true;
+      return new Promise((resolve, reject) => {
+        window.releasePdfFetch = () => nativeFetch(input, init).then(resolve, reject);
+      });
+    }
     if (String(input) === fileUrl) {
       window.fileRead = true;
       window.localSlices = (window.localSlices ?? 0) + 1;
@@ -38,12 +58,20 @@ function mockViewer(origin) {
     }
     return nativeFetch(input, init);
   };
-  chrome.runtime.sendMessage = async () => ({
+  const settings = {
     ok: true, value: {
-      provider: 'google', source: 'en', target: 'zh-CN', disabledSites: [],
+      provider: 'google', source: 'en', target: 'zh-CN', disabledSites: params.has('disabled-site') ? [location.hostname] : [],
       providers: { google: { configured: true, consent: true, hostPermission: true } }
     }
-  });
+  };
+  chrome.runtime.sendMessage = async () => {
+    if (params.has('hold-settings') && !window.pdfSettingsReleased) {
+      await new Promise(resolve => {
+        window.releasePdfSettings = () => { window.pdfSettingsReleased = true; resolve(); };
+      });
+    }
+    return settings;
+  };
   chrome.storage = { onChanged: { addListener(callback) { window.pdfSettingsChanged = callback; } } };
   chrome.runtime.connect = () => {
     let receive;
@@ -134,10 +162,38 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       })()`);
       await page('Input.dispatchMouseEvent', { type: 'mouseWheel', ...location, deltaX: 0 });
     };
-    await navigate('/popup.html');
-    await until(() => evaluate('window.panelOptions?.path === "pdf.html#9"'));
-    await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "在此页对照翻译").click()');
-    assert.deepEqual(await evaluate('window.panelOpened'), { tabId: 9 });
+    for (const suffix of ['', '?pending=1']) {
+      await navigate('/popup.html' + suffix);
+      const action = 'Array.from(document.querySelectorAll("button")).find(b => b.textContent === "在此页对照翻译")';
+      await until(() => evaluate('window.panelOptions?.path === "pdf.html#9" && (' + action + ')?.disabled === false'));
+      await evaluate(action + '.click()');
+      assert.deepEqual(await evaluate('window.panelOpened'), { tabId: 9 });
+    }
+    await navigate('/pdf.html?hold-pdf=1#9');
+    await until(() => evaluate('window.pdfFetchStarted'));
+    await evaluate('updatePdfTab({ status: "loading" }, { pendingUrl: location.origin + "/other" }); releasePdfFetch()');
+    await hasStatus('第 1 页已就绪');
+    assert(await evaluate('!document.querySelector("#viewer").hidden && !window.panelOptions'));
+    await navigate('/pdf.html?pending=1&hold-settings=1&hold-pdf=1#9');
+    await until(() => evaluate('window.pdfTabWatching && window.releasePdfSettings !== undefined'));
+    await evaluate('updatePdfTab({ url: location.origin + "/fixture.pdf", status: "loading" }, { pendingUrl: undefined })');
+    await until(() => evaluate('window.pdfFetchStarted'));
+    await evaluate('updatePdfTab({ url: location.origin + "/fixture.pdf#page=4" }); releasePdfFetch()');
+    await hasStatus('第 4 页已就绪');
+    assert(await evaluate('document.querySelector("#translate").disabled && pdfBatches.length === 0'));
+    await evaluate('releasePdfSettings()');
+    await until(() => evaluate('!document.querySelector("#translate").disabled'));
+    await navigate('/pdf.html?hold-settings=1&disabled-site=1#9');
+    await hasStatus('第 1 页已就绪');
+    await evaluate('releasePdfSettings()');
+    await hasStatus('此站点已在设置中禁用');
+    assert(await evaluate('document.querySelector("#translate").disabled && pdfBatches.length === 0'));
+    await evaluate('updatePdfTab({ status: "loading" }, { url: undefined })');
+    assert(await evaluate('!document.querySelector("#viewer").hidden && !window.panelOptions'));
+    await evaluate('updatePdfTab({ status: "complete" })');
+    await hasStatus('标签页已更新');
+    assert(await evaluate('document.querySelector("#viewer").hidden && window.panelOptions.enabled === false'));
+    ranges.length = 0;
     await navigate('/pdf.html#9');
     await until(() => evaluate('document.querySelector("#status")?.textContent.includes("第 1 页已就绪")'));
     assert.equal(await evaluate('document.querySelector("#total").textContent'), '/ 5');
@@ -283,7 +339,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-footnote")].map(note => note.textContent)'), [
       '2First source note has a superscript.', '3Second source note must stay separate.',
     ]);
-    await evaluate('tabUpdated(9, { status: "loading" }); window.pdfRelease()');
+    await evaluate('updatePdfTab({ url: location.origin + "/different.html", status: "loading" }); window.pdfRelease()');
     await hasStatus('标签页已更新');
     assert(await evaluate('document.querySelector("#viewer").hidden && window.panelOptions.enabled === false'));
     await navigate('/pdf.html?local=deny#9');
@@ -318,17 +374,20 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await hasStatus('分段读取失败');
     await navigate('/pdf.html?path=/whole.pdf#9');
     await hasStatus('第 1 页已就绪');
-    await navigate('/pdf.html');
-    await until(() => evaluate('Boolean(document.querySelector("#file")?.onchange)'));
-    await evaluate(`(async () => {
-      const transfer = new DataTransfer();
-      transfer.items.add(new File([await (await fetch('/whole.pdf')).blob()], 'sample.pdf'));
-      const file = document.querySelector('#file');
-      file.files = transfer.files;
-      file.dispatchEvent(new Event('change'));
-    })()`);
-    await hasStatus('第 1 页已就绪');
-    assert(await evaluate('!!document.querySelector(".pdf-original canvas")'));
+    for (const suffix of ['', '?pending=1#9']) {
+      await navigate('/pdf.html' + suffix);
+      await until(() => evaluate('Boolean(document.querySelector("#file")?.onchange)'));
+      await evaluate(`(async () => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([await (await fetch('/whole.pdf')).blob()], 'sample.pdf'));
+        const file = document.querySelector('#file');
+        file.files = transfer.files;
+        file.dispatchEvent(new Event('change'));
+        updatePdfTab({ url: location.origin + '/fixture.pdf', status: 'complete' }, { pendingUrl: undefined });
+      })()`);
+      await hasStatus('第 1 页已就绪');
+      assert(await evaluate('!!document.querySelector(".pdf-original canvas")'));
+    }
     console.log('PDF opening, range reads, continuous wheel navigation, column order, figures, prefetch, cancellation and retry passed.');
   } finally {
     server.closeAllConnections();

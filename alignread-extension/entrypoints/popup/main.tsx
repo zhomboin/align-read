@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
-import { currentPdf } from '../../src/shared/pdf-source';
+import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
   TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
@@ -45,7 +45,8 @@ function Popup() {
     void browser.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
       if (disposed) return;
       if (tab?.id === undefined) { setError('unsupported-page'); return; }
-      const isPdf = Boolean(await currentPdf(tab.id, tab.url)) || (!tab.url && /\.pdf$/i.test(tab.title ?? ''));
+      const isPdf = Boolean(pdfAddress(tab.pendingUrl) ?? await currentPdf(tab.id, tab.url)) ||
+        (!tab.url && /\.pdf$/i.test(tab.title ?? ''));
       if (disposed) return;
       setTabId(tab.id);
       setPdfTab(isPdf);
