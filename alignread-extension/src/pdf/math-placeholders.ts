@@ -6,8 +6,9 @@ export type PdfTranslationItem = TranslationItem & { inline?: InlineMath[] };
 export function mathPlaceholders(item: PdfTranslationItem) {
   let prefix = 'ARF';
   const original = item.text.toUpperCase();
-  while (original.includes('[[' + prefix)) prefix += 'X';
+  while (original.includes(prefix)) prefix += 'X';
   const pattern = new RegExp('\\[\\[\\s*' + prefix + '\\s*(\\d+)\\s*\\]\\]', 'gi');
+  const residue = new RegExp('\\b' + prefix + '\\s*\\d+\\b', 'i');
   const token = (index: number) => '[[' + prefix + index + ']]';
   const spans = item.inline ?? [];
   const math = spans.map(span => item.text.slice(span.start, span.end));
@@ -28,11 +29,14 @@ export function mathPlaceholders(item: PdfTranslationItem) {
         const index = Number(match[1]);
         if (index >= spans.length || found.has(index)) return;
         found.add(index);
-        output.push(value.slice(end, match.index), index);
+        output.push(value.slice(end, match.index));
+        if (spans[index]!.leading) output.unshift(index);
+        else output.push(index);
         end = match.index + match[0].length;
       }
       if (found.size !== spans.length) return;
       output.push(value.slice(end));
+      if (output.some(part => typeof part === 'string' && residue.test(part))) return;
       return output;
     },
   };

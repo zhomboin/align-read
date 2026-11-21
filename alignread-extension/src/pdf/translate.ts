@@ -3,6 +3,19 @@ import { browser } from 'wxt/browser';
 import { LIMITS, errors, type BatchResult, type ProviderId, type ReadingOptions, type Result, type TranslationItem } from '../shared/reader-messages';
 import { alignMarkerBoundaries, mathPlaceholders, type PdfTranslationItem } from './math-placeholders';
 
+function returnedEnglish(source: string, result: string, options: ReadingOptions) {
+  if (options.target !== 'zh-CN' && options.target !== 'zh-TW') return false;
+  const normalize = (text: string) => text.replace(/\[\[ARFX*\s*\d+\s*\]\]/gi, '').replace(/\s+/g, ' ').trim();
+  const text = normalize(source);
+  return !/\p{Script=Han}/u.test(text) && (text.match(/[a-z]{3,}/gi) ?? []).length >= 5 &&
+    text === normalize(result);
+}
+
+function abnormalRepetition(source: string, result: string) {
+  const repeated = /(.{1,24}?)\1{7}/u.exec(result.replace(/\s/g, ''));
+  return repeated && !source.replace(/\s/g, '').includes(repeated[0]);
+}
+
 export async function translatePage(items: PdfTranslationItem[], provider: ProviderId, options: ReadingOptions, hostname: string,
   signal: AbortSignal, show: (values: TranslationItem[]) => void) {
   const protectedRows = new Map(items.filter(item => item.inline?.length).map(item => [item.id, mathPlaceholders(item)]));
@@ -96,12 +109,24 @@ async function sendItems(items: TranslationItem[], provider: ProviderId, options
         throw new Error(errors['invalid-response']);
       }
       const complete: TranslationItem[] = [];
+      const sources = new Map(batch.map(item => [item.id, item.text]));
+      let failure: string | undefined;
       for (const item of result.value.items) {
+        const source = sources.get(item.id)!;
+        if (returnedEnglish(source, item.text, options)) {
+          failure = '翻译服务返回了未翻译的原文。请重试或切换翻译服务。';
+          continue;
+        }
+        if (abnormalRepetition(source, item.text)) {
+          failure = '翻译服务返回了异常重复的译文。请重试或切换翻译服务。';
+          continue;
+        }
         const group = groups.get(item.id)!;
         group.parts[group.index] = item.text;
         if (group.parts.every(Boolean)) complete.push({ id: group.row, text: group.parts.join('') });
       }
       show(complete);
+      if (failure) throw new Error(failure);
     }
   } finally {
     signal.removeEventListener('abort', stop);

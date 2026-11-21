@@ -4,6 +4,7 @@ import { groupEquations, hasProse, supportsEquation } from './equations';
 import { pageTypography } from './page-typography';
 
 export type PdfBand = { columns: PdfLine[][]; split?: number };
+const referenceNumber = /^\[\d{1,4}\](?=\s+\p{L})/u;
 
 function gutter(placed: PlacedLine[], width: number) {
   // Pair nearby baselines across a clear strip. The two columns can have different leading.
@@ -30,6 +31,15 @@ function gutter(placed: PlacedLine[], width: number) {
   return best >= 2 ? split : undefined;
 }
 
+function wrapsMath(line: PlacedLine, previous: PlacedLine, edge: number) {
+  if (line.style !== 'equation' || line.end - line.x > previous.height * 2 ||
+    Math.abs(line.x - previous.x) > previous.height * .5 || edge - previous.end > previous.height ||
+    line.y <= previous.y || line.y - previous.y > previous.height * 1.5) return false;
+  const closes = line.text.match(/[)\]}]/g) ?? [];
+  const opens = line.text.match(/[(\[{]/g) ?? [];
+  return closes.length > opens.length;
+}
+
 function paragraphs(lines: PlacedLine[], frame: [number, number]) {
   const result: PdfLine[] = [];
   let previous: PlacedLine | undefined;
@@ -37,15 +47,32 @@ function paragraphs(lines: PlacedLine[], frame: [number, number]) {
   for (const line of lines) edge = Math.max(edge, line.end);
   for (const line of lines) {
     const last = result.at(-1);
-    if (last && previous && !previous.keep && !line.keep && (!last.style || last.style === 'caption') && !line.style &&
+    const reference = referenceNumber.exec(line.text);
+    const referenceContinuation = last?.style === 'reference' && !reference && !line.style;
+    const noteContinuation = last?.style === 'footnote' && line.style === 'footnote' && !line.noteStart;
+    const bodyContinuation = (!last?.style || last.style === 'caption') && !line.style && !line.labelEnd && !reference &&
+      !/^\s*\(\d{1,2}\)\s/.test(line.text);
+    const hangingIndent = referenceContinuation || last && /^\(\d{1,2}\)\s/.test(last.text);
+    const referenceYear = referenceContinuation && /^\d{4}\.?$/.test(line.text);
+    if (last && previous && !previous.keep && wrapsMath(line, previous, edge)) {
+      const size = previous.fontSize ?? line.height / 1.25;
+      const start = last.text.length + 1;
+      last.text += ' ' + line.text;
+      last.inline = [...last.inline ?? [], {
+        start, end: last.text.length, position: { bounds: line.bounds, baseline: line.bounds[1] + size * .25, size },
+      }];
+    } else if (last && previous && (!previous.keep || referenceContinuation) && (!line.keep || referenceYear) &&
+      (noteContinuation || referenceContinuation || bodyContinuation) &&
       line.y > previous.y &&
       line.y - previous.y < previous.height * 1.48 &&
       Math.abs(line.height - previous.height) < previous.height * .15 &&
-      line.x <= previous.x + line.height * .55 && Math.abs(previous.x - line.x) < line.height * 2 &&
-      edge - previous.end < previous.height * 2) {
+      (hangingIndent || line.x <= previous.x + line.height * .55) && Math.abs(previous.x - line.x) < line.height * 2 &&
+      (noteContinuation || edge - previous.end < previous.height * 2)) {
       const join = last.text.endsWith('\u00ad') || (/[-\u2010]$/.test(last.text) && /^\p{L}/u.test(line.text)) ||
         (/[\u3400-\u9fff]$/.test(last.text) && /^[\u3400-\u9fff]/.test(line.text)) ? '' : ' ';
-      const prefix = last.text.replace(/\u00ad$/, '') + join;
+      const hyphenated = /[a-z]{3,}-$/.test(last.text) && /^[a-z]/.test(line.text) &&
+        !last.inline?.some(span => span.end >= last.text.length);
+      const prefix = (hyphenated ? last.text.slice(0, -1) : last.text.replace(/\u00ad$/, '')) + join;
       if (line.inline) last.inline = [...last.inline ?? [], ...line.inline.map(span => ({
         ...span, start: prefix.length + span.start, end: prefix.length + span.end,
       }))];
@@ -60,6 +87,12 @@ function paragraphs(lines: PlacedLine[], frame: [number, number]) {
           start: (line.x - left) / width * 100,
           width: (line.end - line.x) / width * 100,
         },
+      });
+    } else if (reference && !line.keep && !line.style) {
+      const end = reference[0].length;
+      result.push({
+        ...line, style: 'reference',
+        inline: [{ start: 0, end, leading: true }, ...line.inline?.filter(span => span.start >= end) ?? []],
       });
     } else {
       result.push({ ...line });

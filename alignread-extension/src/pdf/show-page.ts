@@ -14,7 +14,7 @@ export async function readPage(page: PDFPageProxy): Promise<PageContent> {
   const pageBounds = page.view as PdfBounds;
   const pageArea = (pageBounds[2] - pageBounds[0]) * (pageBounds[3] - pageBounds[1]);
   // A scanned sheet can have an OCR text layer over a full-page raster image.
-  const regions = graphicRegions(operators, pageBounds).filter(([x1, y1, x2, y2]) =>
+  const regions = graphicRegions(operators, pageBounds, lines).filter(([x1, y1, x2, y2]) =>
     !lines.length || (x2 - x1) * (y2 - y1) < pageArea * .72);
   const bands = pageLayout([
     ...lines.filter(({ bounds: [x1, y1, x2, y2] }) => !regions.some(([left, bottom, right, top]) => {
@@ -27,7 +27,17 @@ export async function readPage(page: PDFPageProxy): Promise<PageContent> {
   for (const band of bands) {
     for (const blocks of band.columns) {
       for (const block of blocks) {
-        if (!block.keep) items.push({ id: 'block-' + items.length, text: block.text, inline: block.inline });
+        if (block.keep) continue;
+        if (block.labelEnd && !block.style) {
+          const label = block.text.slice(0, block.labelEnd);
+          const text = block.text.slice(block.labelEnd).trimStart();
+          const offset = block.text.length - text.length;
+          const inline = block.inline?.map(span => ({ ...span, start: span.start - offset, end: span.end - offset }));
+          items.push({ id: 'block-' + items.length, text: label });
+          items.push({ id: 'block-' + items.length, text, inline });
+        } else {
+          items.push({ id: 'block-' + items.length, text: block.text, inline: block.inline });
+        }
       }
     }
   }
@@ -101,6 +111,12 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
   signal.throwIfAborted();
   const content = document.createDocumentFragment();
   const rows = new Map<string, TranslationRow>();
+  const appendRow = (node: HTMLElement) => {
+    const item = model.items[rows.size]!;
+    const render = translationRow(node, item, page, image);
+    render();
+    rows.set(item.id, render);
+  };
   for (const band of model.bands) {
     const group = document.createElement('div');
     if (band.split) {
@@ -113,17 +129,20 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
         const title = block.style === 'title' || block.style === 'heading' || block.style === 'section';
         const element = document.createElement(title ? 'h' + (2 + (block.level ?? 1)) : 'p');
         if (block.style) element.classList.add('pdf-' + block.style);
+        else if (!block.keep && /^\((?:\d{1,2}|[ivx]{1,4})\)\s+/i.test(block.text)) element.classList.add('pdf-list-item');
         if (block.level) element.dataset.level = String(block.level);
         if (block.alignment) element.style.textAlign = block.alignment;
         if (block.keep && image) {
           if (block.graphic) element.classList.add('pdf-figure');
           element.append(originalLine(image.canvas, block, page, image.scale));
-        } else {
-          const item = model.items[rows.size]!;
-          const render = translationRow(element, item, page, image);
-          render();
-          rows.set(item.id, render);
-        }
+        } else if (block.labelEnd && !block.style) {
+          const label = document.createElement('strong');
+          const body = document.createElement('span');
+          body.className = 'pdf-label-body';
+          appendRow(label);
+          appendRow(body);
+          element.append(label, ' ', body);
+        } else appendRow(element);
         column.append(element);
       }
       group.append(column);

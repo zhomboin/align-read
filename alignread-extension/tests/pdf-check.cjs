@@ -57,9 +57,10 @@ function mockViewer(origin) {
           ok: true, value: {
             id, items: items.map(item => ({
               id: item.id,
-              text: params.has('reorder') && item.text.startsWith('Let [[ARF0]]')
-                ? '译 先 [[ARF1]]，再 [[ARF0]]'
-                : '译 ' + (params.has('fallback') ? item.text.replace(/\[\[ARF\d+\]\]/g, '') : item.text),
+              text: window.pdfEcho && item.text.includes('Research for AI + Science')
+                ? window.pdfEcho === 'repeat' ? '重复译文'.repeat(9) : item.text
+                : params.has('reorder') && item.text.startsWith('Let [[ARF0]]') ? '译 先 [[ARF1]]，再 [[ARF0]]'
+                  : '译 ' + (params.has('fallback') ? item.text.replace(/\[\[ARF\d+\]\]/g, '') : item.text),
             }))
           },
         };
@@ -167,7 +168,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       ...Array(3).fill(firstPage), ['2 Article title', left, right, '2.1 Closing note', caption],
     ]);
     assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 Ordinary prose")'));
-    await evaluate('window.pdfHold = "Fourth page prose"');
+    await evaluate('window.pdfHold = "Fourth page prose above the enclosed table."');
     await until(() => evaluate('Boolean(document.querySelector(".pdf-sheet[data-page=\\"2\\"] .pdf-translation"))'));
     await wheelToward(2, .42);
     await until(() => evaluate(`(() => {
@@ -220,13 +221,20 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await hasStatus('第 4 页已就绪');
     assert(await pageNumberAligned('4', 'left'));
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-equation canvas")].map(canvas => canvas.ariaLabel)'),
-      ['公式 (4.1)']);
+      ['公式 (4.1)', '公式 (4.2)']);
     assert(await evaluate('!document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("r = limit")'));
-    assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 1'));
+    assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 2'));
     assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("Labels inside the table")')));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 7'));
-    assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), ['Fourth page prose']);
+    assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), [
+      'Fourth page prose above the enclosed table.',
+      '[[ARF0]]First source note has a superscript.',
+      '[[ARF0]]Second source note must stay separate.',
+    ]);
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-footnote")].map(note => note.textContent)'), [
+      '2First source note has a superscript.', '3Second source note must stay separate.',
+    ]);
     await evaluate('tabUpdated(9, { status: "loading" }); window.pdfRelease()');
     await hasStatus('标签页已更新');
     assert(await evaluate('document.querySelector("#viewer").hidden && window.panelOptions.enabled === false'));
@@ -249,6 +257,15 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('document.querySelector("#translate").click()');
     await hasStatus('第 1 页翻译完成');
     assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("译 先 c + d，再 a + b")'));
+    await navigate('/pdf.html#9');
+    await hasStatus('第 1 页已就绪');
+    await evaluate('window.pdfEcho = true; document.querySelector("#translate").click()');
+    await hasStatus('翻译服务返回了未翻译的原文');
+    await evaluate('window.pdfEcho = "repeat"; document.querySelector("#translate").click()');
+    await hasStatus('翻译服务返回了异常重复的译文');
+    await evaluate('window.pdfEcho = false; document.querySelector("#translate").click()');
+    await hasStatus('第 1 页翻译完成');
+    assert.deepEqual(await evaluate('pdfBatches[1].map(item => item.text)'), ['Research for AI + Science remains useful.']);
     await navigate('/pdf.html?path=/bad.pdf#9');
     await hasStatus('分段读取失败');
     await navigate('/pdf.html?path=/whole.pdf#9');

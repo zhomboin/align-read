@@ -1,6 +1,6 @@
 import { OPS, Util } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFOperatorList } from 'pdfjs-dist/types/src/display/api';
-import type { PdfBounds } from './page-content';
+import type { PdfBounds, PdfLine } from './page-content';
 
 const identity = [1, 0, 0, 1, 0, 0];
 const imageBox = [0, 0, 1, 1];
@@ -44,7 +44,45 @@ function ruledTables(horizontal: PdfBounds[], vertical: PdfBounds[]) {
   return tables;
 }
 
-export function graphicRegions(list: PDFOperatorList, page: PdfBounds) {
+function tablesWithHorizontalRules(rules: PdfBounds[], lines: PdfLine[]) {
+  const bySpan = new Map<string, PdfBounds[]>();
+  for (const rule of rules) {
+    if (width(rule) < 65) continue;
+    const key = [Math.round(rule[0]), Math.round(rule[2])].join(',');
+    const matching = bySpan.get(key) ?? [];
+    matching.push(rule);
+    bySpan.set(key, matching);
+  }
+
+  const tables: PdfBounds[] = [];
+  for (const matching of bySpan.values()) {
+    if (matching.length < 3) continue;
+    matching.sort((a, b) => a[1] - b[1]);
+    let start = 0;
+    const close = (end: number) => {
+      const bounds = union(matching[start]!, matching[end]!);
+      if (end - start >= 2 && height(bounds) >= 18) tables.push(bounds);
+    };
+    for (let index = 1; index < matching.length; index++) {
+      const row = union(matching[index - 1]!, matching[index]!);
+      if (height(row) < 2) continue;
+      const cells = lines.filter(({ bounds }) =>
+        (bounds[1] + bounds[3]) / 2 >= row[1] && (bounds[1] + bounds[3]) / 2 < row[3] &&
+        bounds[0] >= row[0] - 2 && bounds[2] <= row[2] + 2);
+      const centers = cells.map(({ bounds }) => (bounds[0] + bounds[2]) / 2);
+      // A full-width caption or isolated rule does not establish a row of cells.
+      if (height(row) > 42 || centers.length < 2 ||
+        Math.max(...centers) - Math.min(...centers) < width(row) * .2) {
+        close(index - 1);
+        start = index;
+      }
+    }
+    close(matching.length - 1);
+  }
+  return tables;
+}
+
+export function graphicRegions(list: PDFOperatorList, page: PdfBounds, lines: PdfLine[]) {
   type Form = { region?: PdfBounds; start: number; paint: number };
   type State = { matrix: number[]; form?: Form };
   const figures: PdfBounds[] = [];
@@ -104,7 +142,8 @@ export function graphicRegions(list: PDFOperatorList, page: PdfBounds) {
   });
   // Prefer one complete drawing over individual images or rules inside it.
   const regions: PdfBounds[] = [];
-  for (const box of [...figures, ...ruledTables(horizontal, vertical)].sort((a, b) => width(b) * height(b) - width(a) * height(a))) {
+  const tables = [...tablesWithHorizontalRules(horizontal, lines), ...ruledTables(horizontal, vertical)];
+  for (const box of [...figures, ...tables].sort((a, b) => width(b) * height(b) - width(a) * height(a))) {
     if (!regions.some(other => {
       const overlap = intersect(other, box);
       return width(overlap) > width(box) * .95 && height(overlap) > height(box) * .95;

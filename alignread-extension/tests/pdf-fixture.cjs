@@ -30,6 +30,19 @@ function fixturePdf() {
     '20 110 m 220 110 l S', '20 65 m 220 65 l S', '20 65 m 20 110 l S', '220 65 m 220 110 l S',
     'BT /F1 10 Tf 28 80 Td (Labels inside the table) Tj ET',
   ].join('\n');
+  const horizontalTable = [
+    ...[296, 279, 262, 245].map(y => '20 ' + y + ' m 298 ' + y + ' l S'),
+    text(31, 284, 'Sparse table label', 9), text(181, 284, 'Measured result', 9),
+    text(31, 267, 'Sample one', 9), text(181, 267, '23.4', 9),
+    text(31, 250, 'Sample two', 9), text(181, 250, '19.6', 9),
+  ].join('\n');
+  const displayFunction = [
+    text(97, 174, 'f\\(x\\) = w\\(spline\\(x\\)\\)'), text(282, 174, '\\(4.2\\)'),
+  ].join('\n');
+  const notes = [
+    text(20, 53, '2', 7), text(24, 49, 'First source note has a superscript.', 9),
+    text(20, 39, '3', 7), text(24, 35, 'Second source note must stay separate.', 9),
+  ].join('\n');
   const indexedConditions = [
     text(30, 206, 'A = 1'),
     text(78, 206, 'p = 1, n'), text(118.4, 204, 'in', 8), text(125, 206, ','),
@@ -55,7 +68,8 @@ function fixturePdf() {
     page(''), page('/Contents 8 0 R'), stream([chapter, columns, columnEquations, subsection, graphics].join('\n')),
     stream(drawing, '/Type /XObject /Subtype /Form /BBox [0 0 260 60] /Resources << /Font << /F1 4 0 R >> >>'),
     page('/Contents 12 0 R'), page('/Contents 13 0 R'),
-    stream([text(20, 150, 'Fourth page prose', 14), indexedConditions, table, text(20, 12, '4')].join('\n')),
+    stream([horizontalTable, indexedConditions, displayFunction,
+      text(20, 132, 'Fourth page prose above the enclosed table.', 14), table, notes, text(20, 12, '4')].join('\n')),
     stream([text(20, 110, 'Fifth page prose', 14), text(289, 282, 'v'), alignment, wideEquation].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
     // The range reader should be able to leave an unreferenced stream untouched.

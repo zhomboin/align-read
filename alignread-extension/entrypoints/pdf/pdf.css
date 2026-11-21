@@ -39,9 +39,16 @@ button:disabled { opacity: .5; cursor: default; }
 .pdf-translation .pdf-page-number { margin: .75em 0; }
 .pdf-translation .pdf-byline { text-align: center; }
 .pdf-translation .pdf-caption { margin-bottom: 1em; font-size: .9em; }
+.pdf-translation .pdf-footnote { font-size: .875em; line-height: 1.45; }
+.pdf-translation :is(.pdf-reference, .pdf-list-item) { padding-inline-start: 1.3em; text-indent: -1.3em; }
+.pdf-translation :not(.pdf-footnote) + .pdf-footnote {
+  border-block-start: 1px solid #d5ded8;
+  margin-block-start: 1em;
+  padding-block-start: .4em;
+}
 .pdf-translation .pdf-equation { margin: .8em 0; }
 .pdf-translation .pdf-equation canvas { display: block; }
-.pdf-translation .pdf-inline-math { display: inline-block; font-family: serif; white-space: nowrap; max-width: 100%; }
+.pdf-translation .pdf-inline-math { display: inline-block; font-family: serif; white-space: nowrap; max-width: 100%; text-indent: 0; }
 .pdf-columns { display: grid; column-gap: clamp(10px, 2vw, 28px); align-items: start; }
 .pdf-columns > div { min-width: 0; }
 .pdf-translation > div + div { margin-top: .6em; }

@@ -5,7 +5,7 @@ const sectionPrefix = /^(\S+)[\s\u00a0]+(?=\p{L})/u;
 const printedPage = /^(?:(?:page\s*)?(?:\d{1,5}|[ivxlcdm]{1,8})(?:\s*(?:of|\/)\s*\d{1,5})?|第\s*\d{1,5}\s*页)$/i;
 
 function bodySize(lines: PlacedLine[]) {
-  const text = lines.filter(line => !line.style && !line.graphic && !line.keep && line.fontSize && line.text.length >= 3);
+  const text = lines.filter(line => !line.style && !line.graphic && !line.keep && !line.noteStart && line.fontSize && line.text.length >= 3);
   const body = text.filter(line => line.text.length >= 24);
   const proseSizes = (body.length ? body : text).map(line => line.fontSize!).sort((a, b) => a - b);
   return proseSizes[Math.floor(proseSizes.length / 2)] ?? 10;
@@ -55,9 +55,21 @@ export function pageTypography(lines: PlacedLine[], width: number, height: numbe
   const footer = pageNumber(lines, false, width, height, size, page);
   const content = lines.filter(line => line.bounds !== header?.bounds && line.bounds !== footer?.bounds);
   const result: PlacedLine[] = [];
+  let note: PlacedLine | undefined;
   for (let index = 0; index < content.length; index++) {
     const line = content[index]!;
     const next = content[index + 1];
+    if (!line.style && !line.keep && line.fontSize && line.fontSize <= size * .94 &&
+      ((line.noteStart && line.y > height * .68) ||
+        (note && line.y - note.y <= note.height * 1.4 && Math.abs(note.x - line.x) < size * 2))) {
+      // Render the note number as a superscript, outside the source footnote rule.
+      const inline = line.noteStart ? line.inline?.map(span =>
+        span.start === 0 ? { ...span, position: undefined, leading: true } : span) : line.inline;
+      note = { ...line, style: 'footnote', inline };
+      result.push(note);
+      continue;
+    }
+    note = undefined;
     // Wide spacing between a section number and its heading can produce two text runs.
     if (!line.style && sectionNumber.test(line.text) && next && !next.style && next.x >= line.end &&
       next.x - line.end < size * 2.5 && Math.abs(line.y - next.y) <= size * .22) {

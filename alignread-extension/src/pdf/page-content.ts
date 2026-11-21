@@ -1,6 +1,7 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { hasProse } from './equations';
+import { mergeInlineFragments } from './inline-fragments';
 import { inlineMath, withoutMath, type InlineMath, type TextRun } from './inline-math';
 
 export type PdfBounds = [number, number, number, number];
@@ -9,11 +10,14 @@ export type PdfLine = {
   text: string; keep: boolean; bounds: PdfBounds;
   graphic?: boolean;
   math?: boolean;
+  code?: boolean;
+  noteStart?: boolean;
+  labelEnd?: number;
   inline?: InlineMath[];
   textWithoutMath?: string;
   equationClip?: [number, number];
   equationPosition?: { start: number; width: number };
-  style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number';
+  style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number' | 'footnote' | 'reference';
   fontSize?: number;
   bold?: boolean;
   level?: number;
@@ -23,14 +27,14 @@ export type PlacedLine = PdfLine & { x: number; y: number; end: number; height: 
 const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)/i;
 const codeFont = /mono|courier|cmtt/i;
 const boldFont = /bold|demi|heavy|black|semibold|(?:[-, ](?:medi(?:um)?|bd))\b|\+cmbx\d/i;
-const mathText = /[\p{Sm}α-ωΑ-Ω\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
+const mathText = /[\p{Sm}\p{Script=Greek}\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
 const looksLikeCode = /=>|:=|^\s*(?:\/\/|\/\*|#include\b|def\s+\w+\([^)]*\)\s*:|(?:let|const)\s+\w+\s*=.*;\s*$)|[{}]\s*;?$/;
 
 export async function pageLines(page: PDFPageProxy) {
   const { items, styles } = await page.getTextContent();
   const [leftEdge, , rightEdge] = page.view as PdfBounds;
   const margin = (rightEdge - leftEdge) * .10;
-  const lines: PdfLine[] = [];
+  const lines: (PdfLine & { runs: TextRun[] })[] = [];
   let current: TextItem[] = [];
   function flush() {
     if (!current.length) return;
@@ -38,6 +42,7 @@ export async function pageLines(page: PDFPageProxy) {
     let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
     let rotated = false;
     let fontSize = 0, textWidth = 0, boldWidth = 0;
+    let labelEnd = 0, sawRegular = false;
     const runs: TextRun[] = [];
     for (const item of current) {
       const [, , , , x, y] = item.transform;
@@ -54,7 +59,10 @@ export async function pageLines(page: PDFPageProxy) {
         if (/\p{L}/u.test(item.str)) {
           textWidth += item.width;
           fontSize += size * item.width;
-          if (font?.bold || font?.black || boldFont.test(names)) boldWidth += item.width;
+          if (font?.bold || font?.black || boldFont.test(names)) {
+            boldWidth += item.width;
+            if (!sawRegular) labelEnd = text.trimEnd().length;
+          } else sawRegular = true;
         }
         runs.push({
           start, end: text.length, text: item.str, baseline: y, size,
@@ -69,11 +77,20 @@ export async function pageLines(page: PDFPageProxy) {
     const prose = inline.length ? withoutMath(text, inline) : text;
     const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text);
     const mixed = inline.length > 0 && (hasProse(prose, 1) || /\p{Script=Han}/u.test(prose));
-    const keep = rotated || looksLikeCode.test(text) || runs.every(run => run.code) ||
+    const code = runs.filter(run => /[\p{L}\p{N}]/u.test(run.text)).every(run => run.code);
+    const marker = runs[0], following = runs[1];
+    const noteStart = marker && following && /^\d{1,3}$/.test(marker.text.trim()) &&
+      marker.size <= following.size * .85 && marker.baseline > following.baseline + following.size * .12 &&
+      /\p{L}/u.test(following.text);
+    labelEnd -= leading;
+    const hasLabel = sawRegular && labelEnd > 0 && labelEnd < 80 && labelEnd < text.length &&
+      /[.:：。]$/.test(text.slice(0, labelEnd)) && inline.every(span => span.start >= labelEnd);
+    const keep = rotated || looksLikeCode.test(text) || code ||
       (!mixed && !/\p{L}{2}/u.test(text)) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text) ||
       (math && !mixed && !hasProse(text));
     if (text) lines.push({
-      text, keep, math, inline: !keep && mixed ? inline : undefined,
+      text, keep, math, code, noteStart, labelEnd: hasLabel ? labelEnd : undefined,
+      runs, inline: !keep && mixed ? inline : undefined,
       textWithoutMath: inline.length ? prose : undefined,
       bounds: [left, bottom, right, top], fontSize: textWidth ? fontSize / textWidth : undefined,
       bold: textWidth > 0 && boldWidth >= textWidth * .75,
@@ -101,7 +118,7 @@ export async function pageLines(page: PDFPageProxy) {
     if (item.hasEOL) flush();
   }
   flush();
-  return lines;
+  return mergeInlineFragments(lines);
 }
 
 export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number, inline = false) {

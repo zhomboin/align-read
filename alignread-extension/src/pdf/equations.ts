@@ -3,6 +3,11 @@ import type { PdfBounds, PlacedLine } from './page-content';
 const equationTag = /^\(\s*(?:[A-Z]\.)?\d+(?:\.\d+)*[a-z]?\s*\)$/i;
 const mathWords = /^(?:arcsin|arccos|arctan|sin|cos|tan|sinh|cosh|tanh|exp|log|ln|lim|sup|inf|min|max|det|mod|gcd|arg)$/i;
 const words = /\p{L}{2,}/gu;
+const codeCall = /^([\p{L}_][\p{L}\p{N}_.]*)\([^]*\)[.,;]?$/u;
+
+function codeName(line: PlacedLine) {
+  return line.code ? codeCall.exec(line.text)?.[1] : undefined;
+}
 
 export function hasProse(text: string, minimum = 3) {
   return (text.match(words) ?? []).filter(word => !mathWords.test(word)).length >= minimum ||
@@ -10,10 +15,13 @@ export function hasProse(text: string, minimum = 3) {
 }
 
 export function supportsEquation(line: PlacedLine) {
-  if (line.style || line.graphic || !(line.math || line.keep || mathWords.test(line.text))) return false;
+  if (line.style || line.graphic) return false;
+  if (codeName(line)) return true;
+  if (!(line.math || line.keep || mathWords.test(line.text))) return false;
   const text = line.textWithoutMath ?? line.text;
   // Short variable names and roman operators can coexist with math-font glyphs in a display equation.
-  const narrative = text.replace(/\b[A-Z][A-Z0-9]+\s*(?=\()/g, '');
+  const narrative = text.replace(/\b(?:[A-Z][A-Z0-9]+\s*|[A-Za-z][A-Za-z0-9_]*)(?=\()/g, '')
+    .replace(/\b[A-Z]{2,}(?=[a-z]?\b|[\d_])/g, '');
   return !/\p{Script=Han}/u.test(narrative) &&
     !(narrative.match(/\p{L}{3,}/gu) ?? []).some(word => !mathWords.test(word) &&
       !/\p{Script=Greek}.*\p{Script=Latin}|\p{Script=Latin}.*\p{Script=Greek}/u.test(word));
@@ -29,6 +37,9 @@ function verticalGap(a: PlacedLine, b: PlacedLine) {
 }
 
 function sameEquation(a: PlacedLine, b: PlacedLine, em: number, cut: number) {
+  const call = codeName(a);
+  if (call && codeName(b) === call && Math.abs(a.x - b.x) <= em * .35 &&
+    Math.abs(a.y - b.y) <= em * 1.7) return true;
   const gap = Math.max(a.x, b.x) - Math.min(a.end, b.end);
   // Extensible delimiters are often emitted as narrow glyphs above their contents.
   const delimiter = gap <= em * .35 && Math.min(a.end - a.x, b.end - b.x) <= em;
@@ -67,9 +78,9 @@ function isolateInk(block: PlacedLine, neighbors: PlacedLine[], em: number) {
   block.equationClip = [top, bottom];
 }
 
-function insideCrop(line: PlacedLine, crop: PlacedLine) {
+function insideCrop(line: PlacedLine, crop: PlacedLine, tolerance = .25) {
   return line.x >= crop.x && line.end <= crop.end &&
-    Math.abs(line.y - crop.y) + line.height / 2 <= crop.height / 2 + .25;
+    Math.abs(line.y - crop.y) + line.height / 2 <= crop.height / 2 + tolerance;
 }
 
 export function groupEquations(lines: PlacedLine[], cut: number) {
@@ -90,7 +101,7 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
     return index;
   }
   for (const [index, line] of candidates.entries()) {
-    const limit = line.y + (line.height + tallest) / 2 + em * .42;
+    const limit = line.y + Math.max((line.height + tallest) / 2 + em * .42, codeName(line) ? em * 1.7 : 0);
     for (let next = index + 1; next < candidates.length && candidates[next]!.y <= limit; next++) {
       if (sameEquation(line, candidates[next]!, em, cut)) parent[root(next)] = root(index);
     }
@@ -103,7 +114,7 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
     components.set(key, group);
   }
 
-  const formulas = [...components.values()].filter(group => group.some(line => line.math)).map(parts => ({
+  const formulas = [...components.values()].filter(group => group.some(line => line.math || codeName(line))).map(parts => ({
     parts, region: enclosingLine(parts, ''), tag: undefined as PlacedLine | undefined,
   }));
   for (const tag of lines.filter(line => !line.style && equationTag.test(line.text))) {
@@ -119,7 +130,20 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
         Math.max(0, tag.x - region.end, region.x - tag.end);
       return distance(a) - distance(b);
     });
-    if (matches[0]) matches[0].tag = tag;
+    const first = matches[0];
+    if (!first) continue;
+    const other = matches.find(({ region }) => region !== first.region &&
+      (region.y - tag.y) * (first.region.y - tag.y) < 0 &&
+      Math.abs(region.y - first.region.y) < em * 1.6 &&
+      Math.abs(first.region.y + region.y - 2 * tag.y) < em * .5 &&
+      Math.min(region.end, first.region.end) > Math.max(region.x, first.region.x) &&
+      side(tag, cut) * side(region, cut) !== -1);
+    if (other) {
+      first.parts.push(...other.parts);
+      first.region = enclosingLine(first.parts, '');
+      formulas.splice(formulas.indexOf(other), 1);
+    }
+    first.tag = tag;
   }
 
   const replaced = new Set<PlacedLine>();
@@ -132,9 +156,9 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
     (tag ? numbered : unnumbered).push(enclosingLine(constituents, label));
   }
   // The numbered crop renders ink across the gaps between fragments.
-  const covered = (line: PlacedLine) => numbered.some(crop => insideCrop(line, crop));
+  const covered = (line: PlacedLine) => numbered.some(crop => insideCrop(line, crop, em * .18));
   const remaining = lines.filter(line => !replaced.has(line) &&
-    !(line.math && !line.style && !line.graphic && covered(line)));
+    !(!line.style && !line.graphic && !hasProse(line.text, 4) && covered(line)));
   const blocks = [...numbered, ...unnumbered.filter(line => !covered(line))];
   for (const block of blocks) isolateInk(block, remaining, em);
   return [...remaining, ...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
