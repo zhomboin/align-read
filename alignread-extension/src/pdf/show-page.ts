@@ -50,7 +50,7 @@ async function renderCanvas(page: PDFPageProxy, signal: AbortSignal) {
   return { canvas, scale };
 }
 
-function translationRow(node: HTMLParagraphElement, item: PdfTranslationItem, page: PDFPageProxy,
+function translationRow(node: HTMLElement, item: PdfTranslationItem, page: PDFPageProxy,
   image?: { canvas: HTMLCanvasElement; scale: number }): TranslationRow {
   if (!item.inline?.length) return value => {
     const text = value ?? item.text;
@@ -110,18 +110,21 @@ export async function displayPage(page: PDFPageProxy, model: PageContent, signal
     for (const blocks of band.columns) {
       const column = document.createElement('div');
       for (const block of blocks) {
-        const p = document.createElement('p');
-        if (block.style) p.classList.add('pdf-' + block.style);
+        const title = block.style === 'title' || block.style === 'heading' || block.style === 'section';
+        const element = document.createElement(title ? 'h' + (2 + (block.level ?? 1)) : 'p');
+        if (block.style) element.classList.add('pdf-' + block.style);
+        if (block.level) element.dataset.level = String(block.level);
+        if (block.alignment) element.style.textAlign = block.alignment;
         if (block.keep && image) {
-          if (block.graphic) p.className = 'pdf-figure';
-          p.append(originalLine(image.canvas, block, page, image.scale));
+          if (block.graphic) element.classList.add('pdf-figure');
+          element.append(originalLine(image.canvas, block, page, image.scale));
         } else {
           const item = model.items[rows.size]!;
-          const render = translationRow(p, item, page, image);
+          const render = translationRow(element, item, page, image);
           render();
           rows.set(item.id, render);
         }
-        column.append(p);
+        column.append(element);
       }
       group.append(column);
     }

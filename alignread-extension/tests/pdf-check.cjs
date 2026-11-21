@@ -111,6 +111,16 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       try { await until(() => evaluate('document.querySelector("#status")?.textContent.includes(' + JSON.stringify(message) + ')')); }
       catch { throw new Error('Expected ' + message + ', got ' + await evaluate('document.querySelector("#status")?.textContent')); }
     };
+    const pageNumberAligned = (label, direction) => evaluate(`(() => {
+      const number = document.querySelector('.pdf-page-number');
+      const ink = number?.querySelector('canvas');
+      if (ink?.ariaLabel !== ${JSON.stringify(label)} || getComputedStyle(number).textAlign !== '${direction}') return false;
+      const line = number.getBoundingClientRect();
+      const glyph = ink.getBoundingClientRect();
+      if ('${direction}' === 'left') return Math.abs(line.left - glyph.left) < 1;
+      if ('${direction}' === 'right') return Math.abs(line.right - glyph.right) < 1;
+      return Math.abs(line.left + line.right - glyph.left - glyph.right) < 2;
+    })()`);
     await navigate('/popup.html');
     await until(() => evaluate('window.panelOptions?.path === "pdf.html#9"'));
     await evaluate('Array.from(document.querySelectorAll("button")).find(b => b.textContent === "在此页对照翻译").click()');
@@ -121,11 +131,12 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert(await evaluate('!document.querySelector("#original canvas") && !!document.querySelector("#lines canvas[aria-label=\\"x = 2\\"]")'));
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines p > canvas")].map(canvas => canvas.ariaLabel)'),
       ['x = 2', '公式 (1.1)', '1']);
+    assert(await pageNumberAligned('1', 'center'));
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-inline-math")].map(node=>node.textContent || node.querySelector("canvas")?.ariaLabel)'),
       ['f(x)', '102', 'a + b', 'c + d']);
     assert(await evaluate('document.querySelector(".pdf-equation canvas").height > 60 && !document.querySelector("#lines .pdf-columns")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
-    assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2);
+    assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2, JSON.stringify(ranges));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
     await until(() => evaluate('pdfBatches.length === 1'));
     await evaluate('document.querySelector("#cancel").click(); window.pdfRelease(); window.pdfHold = false');
@@ -141,23 +152,27 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     const firstPage = ['function [[ARF0]] is smooth on this interval.', 'function parametrized as a spline.', 'Research for AI + Science remains useful.',
       'The result is [[ARF0]] with modest error.', 'Ordinary prose', 'Let [[ARF0]] and [[ARF1]] be positive'];
     assert.deepEqual(await evaluate('pdfBatches.map(b => b.map(i => i.text))'), [
-      ...Array(3).fill(firstPage), ['Article title', left, right, 'Closing note', caption],
+      ...Array(3).fill(firstPage), ['2 Article title', left, right, '2.1 Closing note', caption],
     ]);
     assert(await evaluate('document.querySelector("#lines").textContent.includes("译 Ordinary prose")'));
     await evaluate('window.pdfHold = "Fourth page prose"; document.querySelector("#next").click()');
     await hasStatus('OCR');
+    assert(await evaluate('document.querySelector(".pdf-page-number") === null'));
     await hasStatus('正在预译第 4 页');
     await evaluate('document.querySelector("#next").click()');
     await hasStatus('第 3 页翻译完成');
     assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-columns > div")].map(el => el.textContent)'), ['译 ' + left, '译 ' + right]);
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-columns > div")].map(el => el.querySelector(".pdf-equation canvas")?.ariaLabel)'),
       ['公式 (2.1)', '公式 (2.2)']);
-    assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("译 Article title")'));
+    assert(await evaluate('document.querySelector("#lines > div:first-child").textContent.includes("译 2 Article title")'));
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#lines .pdf-section")].map(node => [node.tagName, node.textContent, getComputedStyle(node).fontWeight])'),
+      [['H3', '译 2 Article title', '700'], ['H4', '译 2.1 Closing note', '700']]);
     assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
     assert(await evaluate('(() => { const blocks = [...document.querySelectorAll("#lines p")]; const i = blocks.findIndex(block => block.matches(".pdf-figure")); return blocks[i + 1]?.textContent.includes("译 Figure 1"); })()'));
     assert(await evaluate('document.querySelector(".pdf-columns > div:nth-child(2)").getBoundingClientRect().left > document.querySelector(".pdf-columns > div").getBoundingClientRect().right'));
     await evaluate('document.querySelector("#page").value = "5"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 5 页翻译完成');
+    assert(await pageNumberAligned('v', 'right'));
     await evaluate('window.pdfRelease(); document.querySelector("#page").value = "1"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 1 页翻译完成');
     assert.equal(await evaluate('pdfBatches.length'), 6);
@@ -167,6 +182,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert.equal(await evaluate('pdfBatches.length'), 6);
     await evaluate('window.pdfHold = false; document.querySelector("#page").value = "4"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 4 页已就绪');
+    assert(await pageNumberAligned('4', 'left'));
     assert(await evaluate('document.querySelectorAll("#lines .pdf-figure canvas").length === 1'));
     assert(!(await evaluate('document.querySelector("#lines").textContent.includes("Labels inside the table")')));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');

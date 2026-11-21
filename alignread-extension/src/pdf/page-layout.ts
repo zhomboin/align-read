@@ -1,6 +1,7 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PdfLine, PlacedLine } from './page-content';
 import { groupEquations, hasProse } from './equations';
+import { pageTypography } from './page-typography';
 
 export type PdfBand = { columns: PdfLine[][]; split?: number };
 
@@ -102,12 +103,13 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
       y: (y1 + y2) / 2, height: Math.max(1, Math.abs(y1 - y2))
     };
   }).sort((a, b) => a.y - b.y || a.x - b.x);
-  const styled = markStyles(positions, viewport.width, viewport.height);
-  const prose = styled.filter(line => !line.graphic && !line.style && (!line.keep || hasProse(line.text)) &&
+  const { content, header, footer } = pageTypography(markStyles(positions, viewport.width, viewport.height),
+    viewport.width, viewport.height, page.pageNumber);
+  const prose = content.filter(line => !line.graphic && !line.style && (!line.keep || hasProse(line.text)) &&
     line.end - line.x >= Math.max(line.height * 3, viewport.width * .11));
   const split = gutter(prose, viewport.width);
   const cut = (split ?? 0) * viewport.width;
-  const placed = groupEquations(styled, cut);
+  const placed = groupEquations(content, cut);
 
   const rows: PlacedLine[][] = [];
   for (const line of placed) {
@@ -117,9 +119,14 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
     else rows.push([line]);
   }
   for (const row of rows) row.sort((a, b) => a.x - b.x);
-  if (!split) return [{ columns: [paragraphs(rows.flat())] }];
-
   const bands: PdfBand[] = [];
+  if (header) bands.push({ columns: [[header]] });
+  if (!split) {
+    if (rows.length) bands.push({ columns: [paragraphs(rows.flat())] });
+    if (footer) bands.push({ columns: [[footer]] });
+    return bands;
+  }
+
   const heights = prose.map(line => line.height).sort((a, b) => a - b);
   const lineHeight = heights[Math.floor(heights.length / 2)] ?? 12;
   let left: PlacedLine[] = [], right: PlacedLine[] = [];
@@ -142,5 +149,6 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
     }
   }
   flush();
+  if (footer) bands.push({ columns: [[footer]] });
   return bands;
 }
