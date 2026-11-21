@@ -68,14 +68,14 @@ npm run build
 npm run test:selection
 ```
 
-修改双栏提取或显示时，在扩展目录检查类型、构建并运行双栏定向测试。
+修改网页双栏或 PDF 阅读时，在扩展目录检查类型并构建。网页双栏使用 `npm run test:layout`，PDF 使用 `npm run test:pdf`。
 
 ```bash
 npm run check
 npm run build
-npm run test:layout
-npm run test:pdf
 ```
+
+按改动范围执行上述定向测试。PDF 浏览器手动验收步骤见 [论文与 PDF 验收](test-plan.md#论文与-pdf-验收)。
 
 修改原位翻译时，在扩展目录检查类型、构建并运行原位翻译定向测试。
 

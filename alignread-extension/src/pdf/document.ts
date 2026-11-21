@@ -1,37 +1,16 @@
 import { getDocument, GlobalWorkerOptions, type PDFDocumentLoadingTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
+import { documentBytes } from './byte-source';
+
 const assets = new URL('pdfjs/', location.href).href;
 GlobalWorkerOptions.workerSrc = assets + 'pdf.worker.mjs';
-const maxBytes = 100 * 1024 * 1024;
 export type PdfInput = File | URL;
 
-async function readBytes(source: PdfInput, signal: AbortSignal) {
-  if (source instanceof File) {
-    if (source.size > maxBytes) throw new Error('请选择 100 MiB 以内的 PDF。');
-    return new Uint8Array(await source.arrayBuffer());
-  }
-  const response = await fetch(source, { signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
-  if (!response.ok || !response.body) throw new Error('无法读取此网址，请下载 PDF 后选择文件。');
-  const reader = response.body.getReader();
-  const parts: Uint8Array<ArrayBuffer>[] = [];
-  let size = 0;
-  try {
-    for (; ;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) { await reader.cancel(); throw new Error('请选择 100 MiB 以内的 PDF。'); }
-      parts.push(value as Uint8Array<ArrayBuffer>);
-    }
-  } finally { reader.releaseLock(); }
-  return new Uint8Array(await new Blob(parts).arrayBuffer());
-}
-
-export async function openDocument(source: PdfInput, signal: AbortSignal) {
-  const data = await readBytes(source, signal);
+export async function openDocument(source: PdfInput, signal: AbortSignal, fail: (error: Error) => void) {
+  const input = await documentBytes(source, signal, fail);
   signal.throwIfAborted();
   const task: PDFDocumentLoadingTask = getDocument({
-    data, cMapUrl: assets + 'cmaps/', standardFontDataUrl: assets + 'standard_fonts/', wasmUrl: assets + 'wasm/',
+    ...input, cMapUrl: assets + 'cmaps/', standardFontDataUrl: assets + 'standard_fonts/', wasmUrl: assets + 'wasm/',
     iccUrl: assets + 'iccs/', useWasm: false, useWorkerFetch: true, fontExtraProperties: true,
   });
   const destroy = () => { void task.destroy().catch(() => undefined); };

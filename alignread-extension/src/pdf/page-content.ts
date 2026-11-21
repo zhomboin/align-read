@@ -35,8 +35,13 @@ export async function pageLines(page: PDFPageProxy) {
   for (const item of items) {
     if (!('str' in item)) continue;
     const last = current.at(-1);
+    if (!item.str.trim() && item.width > Math.max(10, (last?.height ?? item.height) * 1.2)) {
+      flush();
+      continue;
+    }
     if (last && (Math.abs(item.transform[5] - last.transform[5]) > Math.max(last.height, item.height) * .72 ||
-      item.transform[4] - last.transform[4] - last.width > Math.max(18, last.height * 2))) flush();
+      item.transform[4] - last.transform[4] - last.width > Math.max(10, last.height * 1.2) ||
+      (item.dir !== 'rtl' && item.transform[4] < last.transform[4] - last.height))) flush();
     current.push(item);
     if (item.hasEOL) flush();
   }
