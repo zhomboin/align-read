@@ -146,7 +146,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     assert(await pageNumberAligned('1', 'center'));
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-inline-math")].map(node=>node.textContent || node.querySelector("canvas")?.ariaLabel)'),
       ['f(x)', '102', 'a + b', 'c + d']);
-    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-equation canvas").height > 60 && !document.querySelector(".pdf-sheet[aria-current] .pdf-translation .pdf-columns")'));
+    assert(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-equation canvas[aria-label=\\"公式 (1.1)\\"]").height > 60 && !document.querySelector(".pdf-sheet[aria-current] .pdf-translation .pdf-columns")'));
     assert.deepEqual(await evaluate('pdfBatches'), []);
     assert(ranges.length >= 2 && ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < pdf.length / 2, JSON.stringify(ranges));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');
@@ -196,6 +196,18 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('document.querySelector("#page").value = "5"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 5 页翻译完成');
     assert(await pageNumberAligned('v', 'right'));
+    const placements = await evaluate(`(() => {
+      const equations = [...document.querySelectorAll('.pdf-sheet[aria-current] .pdf-equation canvas')];
+      return equations.map(canvas => {
+        const row = canvas.parentElement.getBoundingClientRect();
+        const box = canvas.getBoundingClientRect();
+        return { label: canvas.ariaLabel, height: canvas.height, start: (box.left - row.left) / row.width, end: (box.right - row.left) / row.width };
+      });
+    })()`);
+    assert.deepEqual(placements.map(equation => equation.label), ['x = 7', '公式 (5.1)', 'z = 3', '公式 (5.2)']);
+    assert(placements[0].start < .03 && placements[1].start > .32 && placements[1].start < .42 &&
+      placements[1].end > .95 && placements[2].start > .85, JSON.stringify(placements));
+    assert(placements[3].start < .03 && placements[3].end > .93 && placements[3].height > 80, JSON.stringify(placements[3]));
     await evaluate('window.pdfRelease()');
     await wheelToward(1);
     await hasStatus('第 1 页翻译完成');

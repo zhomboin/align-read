@@ -30,6 +30,17 @@ function fixturePdf() {
     '20 110 m 220 110 l S', '20 65 m 220 65 l S', '20 65 m 20 110 l S', '220 65 m 220 110 l S',
     'BT /F1 10 Tf 28 80 Td (Labels inside the table) Tj ET',
   ].join('\n');
+  const alignment = [
+    text(20, 247, 'This is a reference paragraph across the page for testing.'),
+    text(20, 215, 'x = 7'),
+    text(124, 180, 'ALG\\(x\\) = x + 2'), text(296, 180, '\\(5.1\\)'),
+    text(292, 143, 'z = 3'),
+  ].join('\n');
+  const wideEquation = [
+    text(20, 79, 'f ='), text(64, 92, 'N', 9), text(60, 81, 'X', 14), text(60, 67, 'i=1', 9),
+    text(87, 79, 'b1 + b2 + b3 + b4 + b5 + b6 + b7'), text(269, 79, '+ 0.5'),
+    text(285, 54, '\\(5.2\\)'),
+  ].join('\n');
   const page = contents => '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 300] /Resources << /Font << /F1 4 0 R /F2 14 0 R >> /XObject << /Figure 9 0 R >> >> ' + contents + ' >>';
   const stream = (text, entries = '') => '<< ' + entries + ' /Length ' + text.length + ' >>\nstream\n' + text + '\nendstream';
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 6 0 R 7 0 R 10 0 R 11 0 R] /Count 5 >>',
@@ -38,7 +49,7 @@ function fixturePdf() {
     stream(drawing, '/Type /XObject /Subtype /Form /BBox [0 0 260 60] /Resources << /Font << /F1 4 0 R >> >>'),
     page('/Contents 12 0 R'), page('/Contents 13 0 R'),
     stream(text(20, 150, 'Fourth page prose', 14) + '\n' + table + '\n' + text(20, 12, '4')),
-    stream(text(20, 150, 'Fifth page prose', 14) + '\n' + text(289, 282, 'v')),
+    stream([text(20, 110, 'Fifth page prose', 14), text(289, 282, 'v'), alignment, wideEquation].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
     // The range reader should be able to leave an unreferenced stream untouched.
     stream(' '.repeat(2 * 1024 * 1024))];

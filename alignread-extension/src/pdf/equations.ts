@@ -1,4 +1,5 @@
 import type { PdfBounds, PlacedLine } from './page-content';
+import { withoutMath } from './inline-math';
 
 const equationTag = /^\(\s*(?:[A-Z]\.)?\d+(?:\.\d+)*[a-z]?\s*\)$/i;
 const mathWords = /^(?:arcsin|arccos|arctan|sin|cos|tan|sinh|cosh|tanh|exp|log|ln|lim|sup|inf|min|max|det|mod|gcd|arg)$/i;
@@ -9,9 +10,14 @@ export function hasProse(text: string, minimum = 3) {
     /[\u3400-\u9fff]{4,}/u.test(text);
 }
 
-function supportsEquation(line: PlacedLine) {
-  return !line.style && !line.graphic && !line.inline && !hasProse(line.text) &&
-    (line.math || line.keep || mathWords.test(line.text));
+export function supportsEquation(line: PlacedLine) {
+  if (line.style || line.graphic || !(line.math || line.keep || mathWords.test(line.text))) return false;
+  const text = line.inline ? withoutMath(line.text, line.inline) : line.text;
+  // Short variable names and roman operators can coexist with math-font glyphs in a display equation.
+  const narrative = text.replace(/\b[A-Z][A-Z0-9]+\s*(?=\()/g, '');
+  return !/\p{Script=Han}/u.test(narrative) &&
+    !(narrative.match(/\p{L}{3,}/gu) ?? []).some(word => !mathWords.test(word) &&
+      !/\p{Script=Greek}.*\p{Script=Latin}|\p{Script=Latin}.*\p{Script=Greek}/u.test(word));
 }
 
 function side(line: PlacedLine, cut: number) {
@@ -49,6 +55,19 @@ function enclosingLine(lines: PlacedLine[], text: string): PlacedLine {
   return { text, keep: true, style: 'equation', bounds, x, end, y: (top + bottom) / 2, height: bottom - top };
 }
 
+function isolateInk(block: PlacedLine, neighbors: PlacedLine[], em: number) {
+  const upper = block.y - block.height / 2, lower = block.y + block.height / 2;
+  let top = 0, bottom = Infinity;
+  for (const line of neighbors) {
+    if (line.keep || line.x >= block.end || line.end <= block.x) continue;
+    const first = line.y - line.height / 2, last = line.y + line.height / 2;
+    // Text-item boxes include the full font em. Trim only small overlaps with adjacent prose.
+    if (line.y < block.y && last <= upper + em * .4) top = Math.max(top, last);
+    if (line.y > block.y && first >= lower - em * .4) bottom = Math.min(bottom, first);
+  }
+  block.equationClip = [top, bottom];
+}
+
 export function groupEquations(lines: PlacedLine[], cut: number) {
   const candidates = lines.filter(line => supportsEquation(line) && !equationTag.test(line.text));
   if (!candidates.length) return lines;
@@ -84,11 +103,16 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
     parts, region: enclosingLine(parts, ''), tag: undefined as PlacedLine | undefined,
   }));
   for (const tag of lines.filter(line => !line.style && equationTag.test(line.text))) {
-    const matches = formulas.filter(({ tag: taken, region }) => !taken && side(tag, cut) * side(region, cut) !== -1 &&
-      verticalGap(tag, region) <= 0 && (tag.x >= region.end || tag.end <= region.x));
+    const matches = formulas.filter(({ tag: taken, region }) => {
+      if (taken || side(tag, cut) * side(region, cut) === -1 || verticalGap(tag, region) > em * .35) return false;
+      if (tag.x >= region.end || tag.end <= region.x) return true;
+      // A formula which takes the full width can place its number below its last baseline.
+      const nearOuterEdge = tag.x >= region.end - em * 3 || tag.end <= region.x + em * 3;
+      return nearOuterEdge && tag.y - tag.height / 2 >= region.y + region.height / 2 - em * .35;
+    });
     matches.sort((a, b) => {
       const distance = ({ region }: typeof a) => Math.abs(tag.y - region.y) * 2 +
-        Math.max(tag.x - region.end, region.x - tag.end);
+        Math.max(0, tag.x - region.end, region.x - tag.end);
       return distance(a) - distance(b);
     });
     if (matches[0]) matches[0].tag = tag;
@@ -96,17 +120,12 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
 
   const replaced = new Set<PlacedLine>();
   const blocks: PlacedLine[] = [];
-  for (const { parts, tag, region } of formulas) {
-    if (parts.length < 2 && !tag) continue;
+  for (const { parts, tag } of formulas) {
     const constituents = tag ? [...parts, tag] : parts;
     for (const line of constituents) replaced.add(line);
-    const block = enclosingLine(constituents, tag ? '公式 ' + tag.text : '公式');
-    if (tag) {
-      // Leave the expression centered while preserving the original offset of its number.
-      block.blankBefore = Math.max(0, tag.end - region.end);
-      block.blankAfter = Math.max(0, region.x - tag.x);
-    }
-    blocks.push(block);
+    blocks.push(enclosingLine(constituents, tag ? '公式 ' + tag.text : parts.length === 1 ? parts[0]!.text : '公式'));
   }
-  return [...lines.filter(line => !replaced.has(line)), ...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
+  const remaining = lines.filter(line => !replaced.has(line));
+  for (const block of blocks) isolateInk(block, remaining, em);
+  return [...remaining, ...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
 }

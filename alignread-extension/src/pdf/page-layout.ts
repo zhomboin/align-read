@@ -1,6 +1,6 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { PdfLine, PlacedLine } from './page-content';
-import { groupEquations, hasProse } from './equations';
+import { groupEquations, hasProse, supportsEquation } from './equations';
 import { pageTypography } from './page-typography';
 
 export type PdfBand = { columns: PdfLine[][]; split?: number };
@@ -30,7 +30,7 @@ function gutter(placed: PlacedLine[], width: number) {
   return best >= 2 ? split : undefined;
 }
 
-function paragraphs(lines: PlacedLine[]) {
+function paragraphs(lines: PlacedLine[], frame: [number, number]) {
   const result: PdfLine[] = [];
   let previous: PlacedLine | undefined;
   let edge = 0;
@@ -50,12 +50,28 @@ function paragraphs(lines: PlacedLine[]) {
         ...span, start: prefix.length + span.start, end: prefix.length + span.end,
       }))];
       last.text = prefix + line.text;
+    } else if (line.style === 'equation') {
+      // Use horizontal coordinates inside the original text area, including the number.
+      const left = Math.min(frame[0], line.x);
+      const right = Math.max(frame[1], line.end);
+      const width = Math.max(1, right - left);
+      result.push({
+        ...line, equationPosition: {
+          start: (line.x - left) / width * 100,
+          width: (line.end - line.x) / width * 100,
+        },
+      });
     } else {
       result.push({ ...line });
     }
     previous = line;
   }
   return result;
+}
+
+function textFrame(lines: PlacedLine[], fallback: [number, number]): [number, number] {
+  if (!lines.length) return fallback;
+  return [Math.min(...lines.map(line => line.x)), Math.max(...lines.map(line => line.end))];
 }
 
 function markStyles(lines: PlacedLine[], width: number, height: number) {
@@ -105,11 +121,12 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
   }).sort((a, b) => a.y - b.y || a.x - b.x);
   const { content, header, footer } = pageTypography(markStyles(positions, viewport.width, viewport.height),
     viewport.width, viewport.height, page.pageNumber);
-  const prose = content.filter(line => !line.graphic && !line.style && (!line.keep || hasProse(line.text)) &&
+  const prose = content.filter(line => !line.graphic && !line.style && !supportsEquation(line) && (!line.keep || hasProse(line.text)) &&
     line.end - line.x >= Math.max(line.height * 3, viewport.width * .11));
   const split = gutter(prose, viewport.width);
   const cut = (split ?? 0) * viewport.width;
   const placed = groupEquations(content, cut);
+  const frame = textFrame(prose, [0, viewport.width]);
 
   const rows: PlacedLine[][] = [];
   for (const line of placed) {
@@ -122,17 +139,19 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
   const bands: PdfBand[] = [];
   if (header) bands.push({ columns: [[header]] });
   if (!split) {
-    if (rows.length) bands.push({ columns: [paragraphs(rows.flat())] });
+    if (rows.length) bands.push({ columns: [paragraphs(rows.flat(), frame)] });
     if (footer) bands.push({ columns: [[footer]] });
     return bands;
   }
 
   const heights = prose.map(line => line.height).sort((a, b) => a - b);
   const lineHeight = heights[Math.floor(heights.length / 2)] ?? 12;
+  const leftFrame = textFrame(prose.filter(line => line.end <= cut), [frame[0], cut]);
+  const rightFrame = textFrame(prose.filter(line => line.x >= cut), [cut, frame[1]]);
   let left: PlacedLine[] = [], right: PlacedLine[] = [];
   function flush() {
-    if (left.length && right.length) bands.push({ columns: [paragraphs(left), paragraphs(right)], split });
-    else if (left.length || right.length) bands.push({ columns: [paragraphs(left.length ? left : right)] });
+    if (left.length && right.length) bands.push({ columns: [paragraphs(left, leftFrame), paragraphs(right, rightFrame)], split });
+    else if (left.length || right.length) bands.push({ columns: [paragraphs(left.length ? left : right, frame)] });
     left = []; right = [];
   }
   let previous: PlacedLine | undefined;
@@ -143,7 +162,7 @@ export function pageLayout(lines: PdfLine[], page: PDFPageProxy): PdfBand[] {
     previous = first;
     if (row.some(line => line.x < cut && line.end > cut)) {
       flush();
-      bands.push({ columns: [row] });
+      bands.push({ columns: [paragraphs(row, frame)] });
     } else {
       for (const line of row) (line.x < cut ? left : right).push(line);
     }

@@ -39,7 +39,8 @@ button:disabled { opacity: .5; cursor: default; }
 .pdf-translation .pdf-page-number { margin: .75em 0; }
 .pdf-translation .pdf-byline { text-align: center; }
 .pdf-translation .pdf-caption { margin-bottom: 1em; font-size: .9em; }
-.pdf-translation .pdf-equation { margin: .8em 0; text-align: center; }
+.pdf-translation .pdf-equation { margin: .8em 0; }
+.pdf-translation .pdf-equation canvas { display: block; }
 .pdf-translation .pdf-inline-math { display: inline-block; font-family: serif; white-space: nowrap; max-width: 100%; }
 .pdf-columns { display: grid; column-gap: clamp(10px, 2vw, 28px); align-items: start; }
 .pdf-columns > div { min-width: 0; }

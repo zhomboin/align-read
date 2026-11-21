@@ -10,8 +10,8 @@ export type PdfLine = {
   graphic?: boolean;
   math?: boolean;
   inline?: InlineMath[];
-  blankBefore?: number;
-  blankAfter?: number;
+  equationClip?: [number, number];
+  equationPosition?: { start: number; width: number };
   style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number';
   fontSize?: number;
   bold?: boolean;
@@ -110,19 +110,22 @@ export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDF
   const padding = line.style === 'equation' ? Math.ceil(2 * scale) : 2;
   const xPadding = inline ? 0 : padding;
   const x = Math.max(0, Math.floor(Math.min(x1, x2)) - xPadding);
-  const y = Math.max(0, Math.floor(Math.min(y1, y2)) - padding);
+  const [clipTop, clipBottom] = line.equationClip ?? [0, canvas.height / scale];
+  const y = Math.max(0, Math.floor(Math.min(y1, y2)) - padding, Math.ceil(clipTop * scale));
   const width = Math.min(canvas.width - x, Math.ceil(Math.max(x1, x2)) + xPadding - x);
-  const height = Math.min(canvas.height - y, Math.ceil(Math.max(y1, y2)) + padding - y);
+  const height = Math.min(canvas.height, Math.floor(clipBottom * scale), Math.ceil(Math.max(y1, y2)) + padding) - y;
   if (width <= 0 || height <= 0) return document.createTextNode(line.text);
-  const before = Math.round((line.blankBefore ?? 0) * scale);
-  const after = Math.round((line.blankAfter ?? 0) * scale);
   const crop = document.createElement('canvas');
-  crop.width = before + width + after;
+  crop.width = width;
   crop.height = height;
   crop.style.width = crop.width / scale * (line.graphic ? 1.7 : 1.45) + 'px';
+  if (line.equationPosition) {
+    crop.style.width = line.equationPosition.width + '%';
+    crop.style.marginLeft = line.equationPosition.start + '%';
+  }
   if (line.graphic) crop.className = 'pdf-graphic';
   crop.setAttribute('role', 'img');
   crop.setAttribute('aria-label', line.text);
-  crop.getContext('2d')!.drawImage(canvas, x, y, width, height, before, 0, width, height);
+  crop.getContext('2d')!.drawImage(canvas, x, y, width, height, 0, 0, width, height);
   return crop;
 }
