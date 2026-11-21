@@ -10,6 +10,7 @@ export type PdfLine = {
   graphic?: boolean;
   math?: boolean;
   inline?: InlineMath[];
+  textWithoutMath?: string;
   equationClip?: [number, number];
   equationPosition?: { start: number; width: number };
   style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number';
@@ -73,6 +74,7 @@ export async function pageLines(page: PDFPageProxy) {
       (math && !mixed && !hasProse(text));
     if (text) lines.push({
       text, keep, math, inline: !keep && mixed ? inline : undefined,
+      textWithoutMath: inline.length ? prose : undefined,
       bounds: [left, bottom, right, top], fontSize: textWidth ? fontSize / textWidth : undefined,
       bold: textWidth > 0 && boldWidth >= textWidth * .75,
     });

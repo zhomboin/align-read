@@ -30,6 +30,13 @@ function fixturePdf() {
     '20 110 m 220 110 l S', '20 65 m 220 65 l S', '20 65 m 20 110 l S', '220 65 m 220 110 l S',
     'BT /F1 10 Tf 28 80 Td (Labels inside the table) Tj ET',
   ].join('\n');
+  const indexedConditions = [
+    text(30, 206, 'A = 1'),
+    text(78, 206, 'p = 1, n'), text(118.4, 204, 'in', 8), text(125, 206, ','),
+    text(145, 206, 'q = 1, n'), text(185.4, 204, 'out', 8), text(198, 206, ','),
+    text(223, 206, 'r = limit'),
+    text(282, 206, '\\(4.1\\)'),
+  ].join('\n');
   const alignment = [
     text(20, 247, 'This is a reference paragraph across the page for testing.'),
     text(20, 215, 'x = 7'),
@@ -48,7 +55,7 @@ function fixturePdf() {
     page(''), page('/Contents 8 0 R'), stream([chapter, columns, columnEquations, subsection, graphics].join('\n')),
     stream(drawing, '/Type /XObject /Subtype /Form /BBox [0 0 260 60] /Resources << /Font << /F1 4 0 R >> >>'),
     page('/Contents 12 0 R'), page('/Contents 13 0 R'),
-    stream(text(20, 150, 'Fourth page prose', 14) + '\n' + table + '\n' + text(20, 12, '4')),
+    stream([text(20, 150, 'Fourth page prose', 14), indexedConditions, table, text(20, 12, '4')].join('\n')),
     stream([text(20, 110, 'Fifth page prose', 14), text(289, 282, 'v'), alignment, wideEquation].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
     // The range reader should be able to leave an unreferenced stream untouched.

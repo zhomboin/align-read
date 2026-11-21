@@ -219,6 +219,9 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await evaluate('window.pdfHold = false; document.querySelector("#page").value = "4"; document.querySelector("#page").dispatchEvent(new Event("change"))');
     await hasStatus('第 4 页已就绪');
     assert(await pageNumberAligned('4', 'left'));
+    assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-equation canvas")].map(canvas => canvas.ariaLabel)'),
+      ['公式 (4.1)']);
+    assert(await evaluate('!document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("r = limit")'));
     assert(await evaluate('document.querySelectorAll(".pdf-sheet[aria-current] .pdf-translation .pdf-figure canvas").length === 1'));
     assert(!(await evaluate('document.querySelector(".pdf-sheet[aria-current] .pdf-translation").textContent.includes("Labels inside the table")')));
     await evaluate('window.pdfHold = true; document.querySelector("#translate").click()');

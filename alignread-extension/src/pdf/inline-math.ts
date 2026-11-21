@@ -26,14 +26,15 @@ export function inlineMath(text: string, runs: TextRun[]) {
     const start = run.start + run.text.indexOf(value);
     const end = start + value.length;
     if (run.math && mathRun.test(value)) ranges.push({ start, end });
-    if (!proseRun || run.size > proseRun.size * .85 || Math.abs(run.baseline - proseRun.baseline) < proseRun.size * .12 ||
-      !/^[\p{L}\p{N}\p{Sm}()+-]{1,5}$/u.test(value)) continue;
     const previous = runs[index - 1];
     const base = previous?.text.match(/(?:^|[^\p{L}\p{N}_])([\p{L}]|\d+(?:\.\d+)?)$/u)?.[1];
-    // Include the base of an exponent or subscript when it is next to the raised glyph.
-    const attached = previous && base && Math.abs(previous.bounds[2] - run.bounds[0]) <= proseRun.size * .3;
+    // The base provides a baseline even in a fragment wholly made of math glyphs.
+    const attached = previous && base && Math.abs(previous.bounds[2] - run.bounds[0]) <= previous.size * .3;
+    const reference = attached ? previous : proseRun;
+    if (!reference || run.size > reference.size * .85 || Math.abs(run.baseline - reference.baseline) < reference.size * .12 ||
+      !/^[\p{L}\p{N}\p{Sm}()+-]{1,5}$/u.test(value)) continue;
     ranges.push({ start: attached ? previous.end - base.length : start, end });
-    scripts.push({ start, end, kind: run.baseline > proseRun.baseline ? 'sup' : 'sub' });
+    scripts.push({ start, end, kind: run.baseline > reference.baseline ? 'sup' : 'sub' });
   }
 
   const merged: Range[] = [];

@@ -1,5 +1,4 @@
 import type { PdfBounds, PlacedLine } from './page-content';
-import { withoutMath } from './inline-math';
 
 const equationTag = /^\(\s*(?:[A-Z]\.)?\d+(?:\.\d+)*[a-z]?\s*\)$/i;
 const mathWords = /^(?:arcsin|arccos|arctan|sin|cos|tan|sinh|cosh|tanh|exp|log|ln|lim|sup|inf|min|max|det|mod|gcd|arg)$/i;
@@ -12,7 +11,7 @@ export function hasProse(text: string, minimum = 3) {
 
 export function supportsEquation(line: PlacedLine) {
   if (line.style || line.graphic || !(line.math || line.keep || mathWords.test(line.text))) return false;
-  const text = line.inline ? withoutMath(line.text, line.inline) : line.text;
+  const text = line.textWithoutMath ?? line.text;
   // Short variable names and roman operators can coexist with math-font glyphs in a display equation.
   const narrative = text.replace(/\b[A-Z][A-Z0-9]+\s*(?=\()/g, '');
   return !/\p{Script=Han}/u.test(narrative) &&
@@ -68,6 +67,11 @@ function isolateInk(block: PlacedLine, neighbors: PlacedLine[], em: number) {
   block.equationClip = [top, bottom];
 }
 
+function insideCrop(line: PlacedLine, crop: PlacedLine) {
+  return line.x >= crop.x && line.end <= crop.end &&
+    Math.abs(line.y - crop.y) + line.height / 2 <= crop.height / 2 + .25;
+}
+
 export function groupEquations(lines: PlacedLine[], cut: number) {
   const candidates = lines.filter(line => supportsEquation(line) && !equationTag.test(line.text));
   if (!candidates.length) return lines;
@@ -119,13 +123,19 @@ export function groupEquations(lines: PlacedLine[], cut: number) {
   }
 
   const replaced = new Set<PlacedLine>();
-  const blocks: PlacedLine[] = [];
+  const numbered: PlacedLine[] = [];
+  const unnumbered: PlacedLine[] = [];
   for (const { parts, tag } of formulas) {
     const constituents = tag ? [...parts, tag] : parts;
     for (const line of constituents) replaced.add(line);
-    blocks.push(enclosingLine(constituents, tag ? '公式 ' + tag.text : parts.length === 1 ? parts[0]!.text : '公式'));
+    const label = tag ? '公式 ' + tag.text : parts.length === 1 ? parts[0]!.text : '公式';
+    (tag ? numbered : unnumbered).push(enclosingLine(constituents, label));
   }
-  const remaining = lines.filter(line => !replaced.has(line));
+  // The numbered crop renders ink across the gaps between fragments.
+  const covered = (line: PlacedLine) => numbered.some(crop => insideCrop(line, crop));
+  const remaining = lines.filter(line => !replaced.has(line) &&
+    !(line.math && !line.style && !line.graphic && covered(line)));
+  const blocks = [...numbered, ...unnumbered.filter(line => !covered(line))];
   for (const block of blocks) isolateInk(block, remaining, em);
   return [...remaining, ...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
 }
