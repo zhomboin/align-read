@@ -24,7 +24,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'AlignRead',
-    description: '双栏网页翻译与原译对照阅读',
+    description: '论文 PDF 与网页对照翻译，保留公式、图表和阅读结构。',
     icons: {
       16: 'icons/16.png',
       32: 'icons/32.png',
