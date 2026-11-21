@@ -90,7 +90,9 @@ export async function pageLines(page: PDFPageProxy) {
     const textLine = main && { baseline: main.baseline, size: main.size };
     const inline = inlineMath(text, runs, main);
     const prose = inline.length ? withoutMath(text, inline) : text;
-    const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text);
+    const hasBodyWord = main && hasProse(main.text, 1);
+    const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text) ||
+      inline.some(span => span.scripts?.length);
     const mixed = inline.length > 0 && (hasProse(prose, 1) || /\p{Script=Han}/u.test(prose));
     const lexical = runs.filter(run => /[\p{L}\p{N}]/u.test(run.text));
     const code = lexical.length > 0 && lexical.every(run => run.code);
@@ -103,7 +105,7 @@ export async function pageLines(page: PDFPageProxy) {
       /[.:：。]$/.test(text.slice(0, labelEnd)) && inline.every(span => span.start >= labelEnd);
     const keep = rotated || looksLikeCode.test(text) || code ||
       (!mixed && !/\p{L}{2}/u.test(text)) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text) ||
-      (math && !mixed && !hasProse(text));
+      (math && !mixed && !hasBodyWord && !hasProse(text));
     if (text) lines.push({
       text, keep, math, code, noteStart, labelEnd: hasLabel ? labelEnd : undefined,
       runs, inline: !keep && mixed ? inline : undefined,

@@ -39,6 +39,11 @@ function fixturePdf() {
   const displayFunction = [
     text(97, 174, 'f\\(x\\) = w\\(spline\\(x\\)\\)'), text(282, 174, '\\(4.2\\)'),
   ].join('\n');
+  const indexedProse = [
+    text(20, 190, 'Use', 10), text(41, 190, 'A', 10, 'F2'), text(48, 195, 'G', 7), text(48, 186, 'i', 7),
+    text(56, 190, 'and', 10), text(77, 190, 'B', 10, 'F2'), text(84, 195, 'G', 7), text(84, 186, 'i,j,k', 7),
+    text(103, 190, 'below.', 10),
+  ].join('\n');
   const notes = [
     text(20, 53, '2', 7), text(24, 49, 'First source note has a superscript.', 9),
     text(20, 39, '3', 7), text(24, 35, 'Second source note must stay separate.', 9),
@@ -75,7 +80,7 @@ function fixturePdf() {
     page(''), page('/Contents 8 0 R'), stream([chapter, columns, columnEquations, subsection, graphics].join('\n')),
     stream(drawing, '/Type /XObject /Subtype /Form /BBox [0 0 260 60] /Resources << /Font << /F1 4 0 R >> >>'),
     page('/Contents 12 0 R'), page('/Contents 13 0 R'),
-    stream([horizontalTable, text(110, 230, 'Table 1: Centered data', 10), indexedConditions, displayFunction,
+    stream([horizontalTable, text(110, 230, 'Table 1: Centered data', 10), indexedConditions, indexedProse, displayFunction,
       text(20, 132, 'Fourth page prose above the enclosed table.', 14), table, notes, text(20, 12, '4')].join('\n')),
     stream([text(289, 282, 'v'), alignment, inlineFraction, wideEquation].join('\n')),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',

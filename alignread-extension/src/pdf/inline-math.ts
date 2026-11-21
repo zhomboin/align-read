@@ -40,7 +40,7 @@ export function inlineMath(text: string, runs: TextRun[], proseRun = mainTextRun
     const attached = previous && base && Math.abs(previous.bounds[2] - run.bounds[0]) <= previous.size * .3;
     const reference = attached ? previous : proseRun;
     if (!reference || run.size > reference.size * .85 || Math.abs(run.baseline - reference.baseline) < reference.size * .12 ||
-      !/^[\p{L}\p{N}\p{Sm}()+-]{1,5}$/u.test(value)) continue;
+      !/^[\p{L}\p{N}\p{Sm}(),+-]{1,9}$/u.test(value)) continue;
     ranges.push({ start: attached ? previous.end - base.length : start, end });
     scripts.push({ start, end, kind: run.baseline > reference.baseline ? 'sup' : 'sub' });
   }

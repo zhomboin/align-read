@@ -270,10 +270,16 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
     await until(() => evaluate('pdfBatches.length === 7'));
     assert.deepEqual(await evaluate('pdfBatches.at(-1).map(i => i.text)'), [
       'Table 1: Centered data',
+      'Use [[ARF0]] and [[ARF1]] below.',
       'Fourth page prose above the enclosed table.',
       '[[ARF0]]First source note has a superscript.',
       '[[ARF0]]Second source note must stay separate.',
     ]);
+    assert.deepEqual(await evaluate(`(() => {
+      const prose = [...document.querySelectorAll('.pdf-sheet[aria-current] .pdf-translation p')]
+        .find(node => node.textContent.startsWith('Use '));
+      return Array.from(prose.querySelectorAll('.pdf-inline-math canvas'), canvas => canvas.ariaLabel);
+    })()`), ['AG i', 'BG i,j,k']);
     assert.deepEqual(await evaluate('[...document.querySelectorAll(".pdf-sheet[aria-current] .pdf-footnote")].map(note => note.textContent)'), [
       '2First source note has a superscript.', '3Second source note must stay separate.',
     ]);

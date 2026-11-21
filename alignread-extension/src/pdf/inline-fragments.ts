@@ -1,4 +1,4 @@
-import type { InlineMath, TextRun } from './inline-math';
+import { withoutMath, type InlineMath, type TextRun } from './inline-math';
 import { enclosingBounds, inlineInk } from './inline-ink';
 import type { PdfBounds, PdfLine } from './page-content';
 
@@ -97,7 +97,7 @@ function combine(parts: Fragment[], head: RegExpMatchArray | undefined, tail: Re
   ];
   return {
     text: prefix + formula + suffix, bounds: enclosingBounds(parts.map(part => part.bounds)), keep: false,
-    math: true, inline, textWithoutMath: before + suffix, fontSize: body.fontSize, textLine: body.textLine,
+    math: true, inline, textWithoutMath: withoutMath(prefix + formula + suffix, inline), fontSize: body.fontSize, textLine: body.textLine,
     noteStart: body.noteStart, labelEnd: head ? body.labelEnd : undefined,
   };
 }
@@ -108,14 +108,36 @@ function spansSeam(left: Fragment, right: Fragment, head: RegExpMatchArray, tail
     (right.inline?.some(span => span.start < tail.index!) || right.bounds[0] < left.bounds[2]);
 }
 
+function joinInline(left: PdfLine, right: PdfLine, offset: number) {
+  const before = [...left.inline ?? []];
+  const after = right.inline?.map(span => ({ ...span, start: span.start + offset, end: span.end + offset })) ?? [];
+  const a = before.at(-1), b = after[0];
+  if (!a?.position || !b?.position || a.end !== left.text.length || b.start !== offset) return [...before, ...after];
+  const first = a.position, last = b.position;
+  const overlap = Math.min(first.bounds[2], last.bounds[2]) - Math.max(first.bounds[0], last.bounds[0]);
+  if (overlap < first.size * .12) return [...before, ...after];
+  // A short lower or upper index can start a third fragment of the same row.
+  // Keep the overlapping glyphs together when translating or wrapping the text.
+  before[before.length - 1] = {
+    ...a, end: b.end,
+    scripts: [...a.scripts ?? [], ...b.scripts?.map(script =>
+      ({ ...script, start: script.start + b.start - a.start, end: script.end + b.start - a.start })) ?? []],
+    position: {
+      ...first,
+      bounds: enclosingBounds([first.bounds, last.bounds]),
+      ink: inlineInk([...first.ink ?? [first.bounds], ...last.ink ?? [last.bounds]]),
+    },
+  };
+  return [...before, ...after.slice(1)];
+}
+
 function joinProse(left: PdfLine, right: PdfLine): PdfLine {
-  const offset = left.text.length + 1;
+  const text = left.text + ' ' + right.text;
+  const inline = joinInline(left, right, left.text.length + 1);
   return {
-    ...left, text: left.text + ' ' + right.text, bounds: enclosingBounds([left.bounds, right.bounds]),
+    ...left, text, bounds: enclosingBounds([left.bounds, right.bounds]),
     math: left.math || right.math,
-    inline: [...left.inline ?? [], ...right.inline?.map(span =>
-      ({ ...span, start: offset + span.start, end: offset + span.end })) ?? []],
-    textWithoutMath: (left.textWithoutMath ?? left.text) + ' ' + (right.textWithoutMath ?? right.text),
+    inline, textWithoutMath: withoutMath(text, inline),
   };
 }
 
