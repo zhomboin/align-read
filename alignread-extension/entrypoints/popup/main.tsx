@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { request } from '../../src/shared/extension';
-import { currentPdf } from '../../src/shared/pdf-source';
+import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
   TRANSLATION_PROVIDERS, defaults, errors, isProviderId, selectedProviderAccess,
@@ -45,7 +45,8 @@ function Popup() {
     void browser.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
       if (disposed) return;
       if (tab?.id === undefined) { setError('unsupported-page'); return; }
-      const isPdf = Boolean(await currentPdf(tab.id, tab.url)) || (!tab.url && /\.pdf$/i.test(tab.title ?? ''));
+      const isPdf = Boolean(pdfAddress(tab.pendingUrl) ?? await currentPdf(tab.id, tab.url)) ||
+        (!tab.url && /\.pdf$/i.test(tab.title ?? ''));
       if (disposed) return;
       setTabId(tab.id);
       setPdfTab(isPdf);
@@ -131,9 +132,12 @@ function Popup() {
     <header>
       <div className="brand"><img src="/icons/32.png" alt="" width="28" height="28" /><h1>AlignRead</h1></div>
       <button type="button" onClick={() => void browser.runtime.openOptionsPage()}>设置</button>
-      {pdfTab && tabId !== undefined ? <button type="button" disabled={!panelReady} onClick={() => {
+      {pdfTab && tabId !== undefined ? <><button type="button" disabled={!panelReady} onClick={() => {
         void browser.sidePanel.open({ tabId }).then(() => window.close(), () => setPanelError(true));
-      }}>在此页对照翻译</button> : <button type="button" disabled={tabId === undefined}
+      }}>在此页对照翻译</button><button type="button" onClick={() => {
+        void browser.tabs.create({ url: browser.runtime.getURL('/pdf.html') + '#inplace=' + tabId })
+          .then(() => window.close(), () => setError('unavailable'));
+      }}>在新标签页原位翻译</button></> : <button type="button" disabled={tabId === undefined}
         onClick={() => void browser.tabs.create({ url: browser.runtime.getURL('/pdf.html') })}>打开 PDF</button>}
     </header>
     {panelError && <p className="notice" role="status">无法打开侧边栏，请重新打开扩展后重试。</p>}

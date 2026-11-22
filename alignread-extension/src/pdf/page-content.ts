@@ -1,39 +1,130 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import { hasProse } from './equations';
+import { mergeInlineFragments } from './inline-fragments';
+import { inlineMath, mainTextRun, withoutMath, type InlineMath, type TextRun } from './inline-math';
 
-export type PdfLine = { text: string; keep: boolean; bounds: [number, number, number, number]; };
-const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)|mono|courier|cmtt/i;
-const mathText = /[\p{Sm}α-ωΑ-Ω\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
-const looksLikeCode = /[{}]|;\s*$|(?:=>|:=|\/\/|\/\*|\w+\([^)]*\)|\w+\s*[_^]\s*[\w{])|^\s*(?:#|def |class |import |return |const |let |function )/;
+export type PdfBounds = [number, number, number, number];
+export type PdfAlignment = 'left' | 'center' | 'right';
+export type PdfLine = {
+  text: string; keep: boolean; bounds: PdfBounds;
+  sourceLines?: PdfBounds[];
+  graphic?: boolean;
+  math?: boolean;
+  code?: boolean;
+  noteStart?: boolean;
+  labelEnd?: number;
+  inline?: InlineMath[];
+  textWithoutMath?: string;
+  equationClip?: [number, number];
+  equationPosition?: { start: number; width: number };
+  style?: 'title' | 'heading' | 'byline' | 'caption' | 'equation' | 'section' | 'page-number' | 'footnote' | 'reference';
+  fontSize?: number;
+  textLine?: Pick<TextRun, 'baseline' | 'size'>;
+  bold?: boolean;
+  level?: number;
+  alignment?: PdfAlignment;
+};
+export type PlacedLine = PdfLine & { x: number; y: number; end: number; height: number; baselineY?: number };
+const mathFont = /cmmi|cmsy|cmex|math|symbol|stix.*(?:italic|symbol)/i;
+const codeFont = /mono|courier|cmtt/i;
+const boldFont = /bold|demi|heavy|black|semibold|(?:[-, ](?:medi(?:um)?|bd))\b|\+cmbx\d/i;
+const mathText = /[\p{Sm}\p{Script=Greek}\u2070-\u209f\u{1d400}-\u{1d7ff}]/u;
+const looksLikeCode = /=>|:=|^\s*(?:\/\/|\/\*|#include\b|def\s+\w+\([^)]*\)\s*:|(?:let|const)\s+\w+\s*=.*;\s*$)|[{}]\s*;?$/;
 
 export async function pageLines(page: PDFPageProxy) {
   const { items, styles } = await page.getTextContent();
-  const lines: PdfLine[] = [];
+  const [leftEdge, , rightEdge] = page.view as PdfBounds;
+  const margin = (rightEdge - leftEdge) * .10;
+  const lines: (PdfLine & { runs: TextRun[] })[] = [];
   let current: TextItem[] = [];
   function flush() {
     if (!current.length) return;
     let text = '';
     let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
-    let protectedFont = false;
+    let rotated = false;
+    let fontSize = 0, textWidth = 0, boldWidth = 0;
+    let labelEnd = 0, sawRegular = false;
+    const runs: TextRun[] = [];
     for (const item of current) {
       const [, , , , x, y] = item.transform;
       const size = Math.max(1, item.height || Math.hypot(item.transform[2], item.transform[3]));
       if (x - right > size * .15 && text && !/\s$/.test(text) && !/^\s/.test(item.str)) text += ' ';
+      const start = text.length;
       text += item.str;
       left = Math.min(left, x); right = Math.max(right, x + item.width);
       bottom = Math.min(bottom, y - size * .25); top = Math.max(top, y + size);
       const font = page.commonObjs.has(item.fontName) ? page.commonObjs.get(item.fontName) : undefined;
-      protectedFont ||= Boolean(item.str.trim() && (mathFont.test(font?.name ?? '') ||
-        mathFont.test(styles[item.fontName]?.fontFamily ?? '') || Math.abs(item.transform[1]) > .01));
+      if (item.str.trim()) {
+        const style = styles[item.fontName];
+        const names = (font?.name ?? '') + ' ' + (style?.fontFamily ?? '');
+        const math = mathFont.test(names);
+        rotated ||= Math.abs(item.transform[1]) > .01;
+        if (/\p{L}/u.test(item.str)) {
+          textWidth += item.width;
+          fontSize += size * item.width;
+          if (font?.bold || font?.black || boldFont.test(names)) {
+            boldWidth += item.width;
+            if (!sawRegular) labelEnd = text.trimEnd().length;
+          } else sawRegular = true;
+        }
+        const slack = size * (math ? .10 : .05);
+        const ascent = style?.ascent ?? .82;
+        // Extensible symbols such as a display-sized sum can extend far below
+        // the font's line descent when their baseline is near the top.
+        const descent = math && ascent < .15 && font?.bbox
+          ? Math.min(style?.descent ?? -.24, font.bbox[1] / 1000) : style?.descent ?? -.24;
+        const ink: PdfBounds = [
+          x - slack, y + size * descent - slack,
+          x + item.width + slack, y + size * ascent + slack,
+        ];
+        runs.push({
+          start, end: text.length, text: item.str, baseline: y, size,
+          math, code: codeFont.test(names), bounds: [x, y - size * .25, x + item.width, y + size], ink,
+        });
+      }
     }
+    const leading = text.length - text.trimStart().length;
     text = text.trim();
-    const keep = protectedFont || mathText.test(text) || looksLikeCode.test(text) ||
-      !/\p{L}{2}/u.test(text) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text);
-    if (text) lines.push({ text, keep, bounds: [left, bottom, right, top] });
+    for (const run of runs) { run.start -= leading; run.end -= leading; }
+    const main = mainTextRun(runs);
+    const textLine = main && { baseline: main.baseline, size: main.size };
+    const inline = inlineMath(text, runs, main);
+    const prose = inline.length ? withoutMath(text, inline) : text;
+    const hasBodyWord = main && hasProse(main.text, 1);
+    const math = runs.some(run => run.math) || mathText.test(text) || /[=+·…]/.test(text) ||
+      inline.some(span => span.scripts?.length);
+    const mixed = inline.length > 0 && (hasProse(prose, 1) || /\p{Script=Han}/u.test(prose));
+    const lexical = runs.filter(run => /[\p{L}\p{N}]/u.test(run.text));
+    const code = lexical.length > 0 && lexical.every(run => run.code);
+    const marker = runs[0], following = runs[1];
+    const noteStart = marker && following && /^\d{1,3}$/.test(marker.text.trim()) &&
+      marker.size <= following.size * .85 && marker.baseline > following.baseline + following.size * .12 &&
+      /\p{L}/u.test(following.text);
+    labelEnd -= leading;
+    const hasLabel = sawRegular && labelEnd > 0 && labelEnd < 80 && labelEnd < text.length &&
+      /[.:：。]$/.test(text.slice(0, labelEnd)) && inline.every(span => span.start >= labelEnd);
+    const keep = rotated || looksLikeCode.test(text) || code ||
+      (!mixed && !/\p{L}{2}/u.test(text)) || /^(?:[a-zA-Z]\s+){2,}[a-zA-Z]$/.test(text) ||
+      (math && !mixed && !hasBodyWord && !hasProse(text));
+    if (text) lines.push({
+      text, keep, math, code, noteStart, labelEnd: hasLabel ? labelEnd : undefined,
+      runs, inline: !keep && mixed ? inline : undefined,
+      textWithoutMath: inline.length ? prose : undefined,
+      bounds: [left, bottom, right, top], textLine, fontSize: textWidth ? fontSize / textWidth : undefined,
+      bold: textWidth > 0 && boldWidth >= textWidth * .75,
+    });
     current = [];
   }
   for (const item of items) {
     if (!('str' in item)) continue;
+    // Rotated publishing marks at the sheet edge belong to the original page.
+    const x = item.transform[4];
+    if (Math.abs(item.transform[1]) > Math.abs(item.transform[0]) &&
+      (x < leftEdge + margin || x > rightEdge - margin)) {
+      flush();
+      continue;
+    }
     const last = current.at(-1);
     if (!item.str.trim() && item.width > Math.max(10, (last?.height ?? item.height) * 1.2)) {
       flush();
@@ -46,25 +137,44 @@ export async function pageLines(page: PDFPageProxy) {
     if (item.hasEOL) flush();
   }
   flush();
-  return lines;
+  return mergeInlineFragments(lines);
 }
 
-export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number) {
+export function originalLine(canvas: HTMLCanvasElement, line: PdfLine, page: PDFPageProxy, scale: number, inline?: { ink?: PdfBounds[] }) {
+  if (inline?.ink?.length === 0) return document.createTextNode(line.text);
   const viewport = page.getViewport({ scale });
   const [left, bottom, right, top] = line.bounds;
   const [x1, y1] = viewport.convertToViewportPoint(left, bottom);
   const [x2, y2] = viewport.convertToViewportPoint(right, top);
-  const x = Math.max(0, Math.floor(Math.min(x1, x2)) - 2);
-  const y = Math.max(0, Math.floor(Math.min(y1, y2)) - 2);
-  const width = Math.min(canvas.width - x, Math.ceil(Math.max(x1, x2)) + 2 - x);
-  const height = Math.min(canvas.height - y, Math.ceil(Math.max(y1, y2)) + 2 - y);
+  const padding = line.style === 'equation' ? Math.ceil(2 * scale) : 2;
+  const xPadding = inline ? 0 : padding;
+  const x = Math.max(0, Math.floor(Math.min(x1, x2)) - xPadding);
+  const [clipTop, clipBottom] = line.equationClip ?? [0, canvas.height / scale];
+  const y = Math.max(0, Math.floor(Math.min(y1, y2)) - padding, Math.ceil(clipTop * scale));
+  const width = Math.min(canvas.width - x, Math.ceil(Math.max(x1, x2)) + xPadding - x);
+  const height = Math.min(canvas.height, Math.floor(clipBottom * scale), Math.ceil(Math.max(y1, y2)) + padding) - y;
   if (width <= 0 || height <= 0) return document.createTextNode(line.text);
   const crop = document.createElement('canvas');
   crop.width = width;
   crop.height = height;
-  crop.style.width = width / scale * 1.45 + 'px';
+  crop.style.width = crop.width / scale * (line.graphic ? 1.7 : 1.45) + 'px';
+  if (line.equationPosition) {
+    crop.style.width = line.equationPosition.width + '%';
+    crop.style.marginLeft = line.equationPosition.start + '%';
+  }
+  if (line.graphic) crop.className = 'pdf-graphic';
   crop.setAttribute('role', 'img');
   crop.setAttribute('aria-label', line.text);
-  crop.getContext('2d')!.drawImage(canvas, x, y, width, height, 0, 0, width, height);
+  const context = crop.getContext('2d')!;
+  if (inline?.ink?.length) {
+    context.beginPath();
+    for (const [l, b, r, t] of inline.ink) {
+      const [ax, ay] = viewport.convertToViewportPoint(l, b);
+      const [bx, by] = viewport.convertToViewportPoint(r, t);
+      context.rect(Math.min(ax, bx) - x, Math.min(ay, by) - y, Math.abs(ax - bx), Math.abs(ay - by));
+    }
+    context.clip();
+  }
+  context.drawImage(canvas, x, y, width, height, 0, 0, width, height);
   return crop;
 }

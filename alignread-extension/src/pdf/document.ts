@@ -6,8 +6,8 @@ const assets = new URL('pdfjs/', location.href).href;
 GlobalWorkerOptions.workerSrc = assets + 'pdf.worker.mjs';
 export type PdfInput = File | URL;
 
-export async function openDocument(source: PdfInput, signal: AbortSignal, fail: (error: Error) => void) {
-  const input = await documentBytes(source, signal, fail);
+export async function openDocument(source: PdfInput, signal: AbortSignal, onRangeFailure: () => void, wholeFile: boolean) {
+  const input = await documentBytes(source, signal, onRangeFailure, wholeFile);
   signal.throwIfAborted();
   const task: PDFDocumentLoadingTask = getDocument({
     ...input, cMapUrl: assets + 'cmaps/', standardFontDataUrl: assets + 'standard_fonts/', wasmUrl: assets + 'wasm/',
