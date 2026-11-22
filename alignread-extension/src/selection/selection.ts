@@ -1,23 +1,11 @@
-import { browser } from 'wxt/browser';
-import { errors, failure, type Result } from '../shared/reader-messages';
-import { MAX_SELECTION_LENGTH, type SelectionRequest, type SelectionSession } from '../shared/selection-messages';
+import { errors } from '../shared/reader-messages';
+import { MAX_SELECTION_LENGTH, type SelectionSession } from '../shared/selection-messages';
 import { createPanel } from './panel';
-import { startParagraphs } from './paragraphs';
+import { send } from './session';
 import { readSelection, sameSelection, type SelectedText } from './source';
 
-async function send<T>(message: SelectionRequest): Promise<Result<T>> {
-  try {
-    return (await browser.runtime.sendMessage(message) as Result<T> | undefined) ?? failure('unavailable');
-  } catch {
-    return failure('unavailable');
-  }
-}
-
-export function startSelection(session: SelectionSession, onStop: () => void) {
+export function startSelection(session: SelectionSession, signal: AbortSignal, currentPage: () => boolean) {
   const panel = createPanel(session);
-  const pageUrl = location.href;
-  const lifecycle = new AbortController();
-  const { signal } = lifecycle;
   let selected: SelectedText | undefined;
   let frame = 0;
   let open = false;
@@ -32,22 +20,13 @@ export function startSelection(session: SelectionSession, onStop: () => void) {
     void send({ type: 'selection:cancel', sessionId: session.id, requestId: previous });
   }
 
-  function stop() {
-    if (signal.aborted) return;
-    lifecycle.abort();
+  signal.addEventListener('abort', () => {
     cancelAnimationFrame(frame);
     cancel();
     panel.host.remove();
     selected = undefined;
     translation = '';
-    void send({ type: 'selection:closed', sessionId: session.id });
-    onStop();
-  }
-
-  function currentPage() {
-    if (location.href !== pageUrl || !panel.host.isConnected) stop();
-    return !signal.aborted;
-  }
+  }, { once: true });
 
   function dismiss(restoreFocus = false) {
     const focused = restoreFocus && panel.shadow.activeElement !== null;
@@ -146,13 +125,8 @@ export function startSelection(session: SelectionSession, onStop: () => void) {
   document.addEventListener('selectionchange', scheduleRefresh, { signal });
   window.addEventListener('scroll', scheduleRefresh, { signal, capture: true, passive: true });
   window.addEventListener('resize', scheduleRefresh, { signal });
-  window.addEventListener('hashchange', stop, { signal });
-  window.addEventListener('popstate', () => { currentPage(); }, { signal });
-  const navigation = (window as Window & { navigation?: EventTarget }).navigation;
-  navigation?.addEventListener('currententrychange', currentPage, { signal });
-  const setShortcut = startParagraphs(session, signal, currentPage, send);
   refresh();
-  return { id: session.id, stop, setShortcut };
+  return { isConnected: () => panel.host.isConnected };
 }
 
 function copyText(text: string) {

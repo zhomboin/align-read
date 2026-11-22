@@ -1,5 +1,5 @@
-import type { Result } from '../shared/reader-messages';
-import type { SelectionRequest, SelectionSession } from '../shared/selection-messages';
+import { send } from './session';
+import type { SelectionSession } from '../shared/selection-messages';
 import { splitText } from '../shared/split-text';
 import { DEFAULT_PARAGRAPH_SHORTCUT, listenForShortcut } from '../shared/paragraph-shortcut';
 import { createParagraphFeedback } from './paragraph-feedback';
@@ -11,8 +11,7 @@ type Entry = {
   requestId?: string;
 };
 
-export function startParagraphs(session: SelectionSession, signal: AbortSignal, currentPage: () => boolean,
-  send: <T>(message: SelectionRequest) => Promise<Result<T>>) {
+export function startParagraphs(session: SelectionSession, signal: AbortSignal, currentPage: () => boolean) {
   const entries = new Map<Text, Entry>();
   let queue = Promise.resolve();
   let sequence = 0;
@@ -20,7 +19,7 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
   function remove(entry: Entry) {
     entries.delete(entry.source.first);
     entry.view.host.remove();
-    if (entry.requestId) void send({ type: 'selection:cancel-paragraph', sessionId: session.id, requestId: entry.requestId });
+    if (entry.requestId) void send({ type: 'paragraph:cancel', sessionId: session.id, requestId: entry.requestId });
   }
 
   function attached({ source, view: { host } }: Entry) {
@@ -43,7 +42,7 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     for (const part of splitText(entry.source.text)) {
       const requestId = String(++sequence);
       entry.requestId = requestId;
-      const result = await send<string>({ type: 'selection:paragraph', sessionId: session.id, requestId, text: part });
+      const result = await send<string>({ type: 'paragraph:translate', sessionId: session.id, requestId, text: part });
       entry.requestId = undefined;
       if (!current(entry)) return;
       if (!result.ok) {
@@ -109,8 +108,10 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     observer.disconnect();
     for (const entry of entries.values()) remove(entry);
   }, { once: true });
-  return (next: string) => {
-    shortcut = next;
-    resetKeys();
+  return {
+    setShortcut(next: string) {
+      shortcut = next;
+      resetKeys();
+    },
   };
 }

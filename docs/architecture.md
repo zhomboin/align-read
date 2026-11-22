@@ -11,7 +11,7 @@
 | 原译对齐 | F-04、F-05 | 段落级双向悬停高亮、直接点击定位和按锚点联动。译文支持 Enter 定位，同步默认开启 |
 | 翻译执行 | F-06 | 支持 Google Cloud Translation Basic、有道智云、自定义 AI 和[官方 AI 服务](translation-services.md)。分批翻译、增量展示、失败可重试，多个标签页独立运行 |
 | 恢复与边界 | F-07、F-08 | 关闭和失效时清理扩展的页面改动；受限页面和布局冲突给出原因；外发前确认，排除敏感输入 |
-| 选词与段落翻译 | F-09、F-10 | 共用当前标签页开关。「译」打开选词卡片，按段落快捷键逐段插入译文 |
+| 选词与段落翻译 | F-09、F-10 | 当前标签页中的两个独立开关。「译」打开选词卡片，按段落快捷键逐段插入译文 |
 | 原位翻译 | F-11 | 在原网页写入译文，保留原有标签、链接、样式和交互。弹窗可恢复原文 |
 | 单页应用 | F-13 | 原页内容变动时更新译文。站内换页后清除旧译文，等待新正文并继续翻译 |
 
@@ -30,6 +30,7 @@ alignread-extension/
     background.ts              # MV3 Service Worker
     reader.ts                  # 由 scripting API 在顶层文档按需注入
     selection.ts               # 按需注入选词功能
+    paragraph.ts               # 按需注入段落功能
     popup/                     # 当前标签页的状态与操作
     options/                   # 全局配置、站点规则和隐私设置
   src/
@@ -55,11 +56,11 @@ alignread-extension/
 | 运行上下文 | 持有的状态与职责 |
 | --- | --- |
 | Popup / Options | 工具栏弹窗操作当前文档。独立标签页中的设置按翻译服务、双栏阅读、快捷键、站点与缓存分区，阅读与站点偏好按分类保存。两者都通过 Worker 处理请求。弹窗关闭后翻译继续。 |
-| Content Script | 每个顶层文档最多拥有一个双栏或原位会话，以及独立的选词会话。双栏和选词通过 Shadow DOM 挂载界面，原位翻译直接写入现有文字节点。 |
+| Content Script | 每个顶层文档最多拥有一个双栏或原位会话，以及相互独立的选词和段落会话。双栏和选词通过 Shadow DOM 挂载界面，原位翻译直接写入现有文字节点。 |
 | Service Worker | 接收扩展操作、执行注入、管理授权和设置、核验来自页面的请求、执行 Provider 批次并统一限流。 |
 | Storage | `storage.local` 保存设置、凭据和服务授权记录，`storage.session` 保存标签页与文档的临时任务授权。原文、译文和 DOM 映射留在各自会话内存。 |
 
-Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发送失败时，注入对应脚本。同一文档内可复用已加载的脚本。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
+Worker 按需注入网页、选词或段落翻译脚本。状态查询没有回复或发送失败时，注入对应脚本。同一文档内可复用已加载的脚本。Chrome 可以回收 Worker，页面队列保留在 Content Script，设置从存储重读，Worker 内的并发槽与请求控制器只服务当前在途批次。
 
 ## 3. 网页翻译与段落映射
 
@@ -105,22 +106,24 @@ Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发�
 | 批次响应 | Worker → Reader | Worker 返回批次 ID 和翻译项 ID。Reader 只把结果归入当前页面仍有效的阅读块，处理超时、结果缺失或取消。 |
 | `closed`、`resize` | Reader → Worker | 当前文档关闭会话或保存栏宽偏好。关闭后 Worker 取消对应在途任务并移除临时授权。 |
 | `reader:clear-cache` | Worker → Reader | 在设置页清空或关闭缓存时，通知活跃 Reader。 |
-| `selection-start`、`selection-stop` | Popup → Worker | 校验服务和当前文档，独立管理选词会话。 |
-| `selection:start`、`selection:state`、`selection:stop` | Worker → 选词脚本 | 绑定到当前文档，挂载、查询或清理选词界面。 |
-| `selection:translate`、`selection:paragraph`、对应取消消息及 `selection:closed` | 选词脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
+| `selection-start`、`selection-stop`、`paragraph-start`、`paragraph-stop` | Popup → Worker | 校验服务和当前文档，分别管理选词和段落会话。 |
+| `selection:*`、`paragraph:*` 控制消息 | Worker → 对应内容脚本 | 按功能启动、查询或停止。快捷键更改仅发给段落脚本。 |
+| `selection:translate`、`paragraph:translate` 及对应的取消和关闭消息 | 选词或段落脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
+
+选词和段落会话允许在相同路径和查询参数下跳转到当前文档中存在的章节锚点。地址带有新的章节标记时，后台在送译前向原文档核实会话。路径、查询参数、哈希路由或无法定位的片段发生变化时，会话结束。
 
 每次开启或成功切换模式都会生成独立会话 ID。Worker 维护标签页、文档及开启地址的授权，Reader 维护翻译项和文字映射。Worker 在请求前后比对批次路由与浏览器提供的当前地址。刷新、跨文档导航、`pagehide` 或关闭会令旧会话失效。切换翻译服务后需重新开启。切换标签页只改变 Popup 的操作目标，各文档的翻译独立进行。
 
 Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、`error`。无活动会话时显示原文。暂停停止派发后续批次，在途批次可完成。关闭立即阻止迟到结果应用，Worker 中断或请求失败的批次可重试。
 
-选词脚本读取选区显示的文字，过滤不可见或受限选区。点击「译」最多发送 1000 字符，卡片随选区变化清理。按段落快捷键时，脚本按块或显式换行识别选区触及的各段，发送每一段完整可见正文。快捷键保存在本机，Worker 将更改发给已开启的选词会话。段落请求独立排队，长段分片后合并回同一位置。响应按原段校验，原文更新或移除时清理，切换选区可继续阅读已有段落译文。
+选词脚本读取选区显示的文字，过滤不可见或受限选区。点击「译」最多发送 1000 字符，卡片随选区变化清理。按段落快捷键时，脚本按块或显式换行识别选区触及的各段，发送每一段完整可见正文。快捷键保存在本机，Worker 将更改发给已开启的段落会话。段落请求独立排队，长段分片后合并回同一位置。响应按原段校验，原文更新或移除时清理，切换选区可继续阅读已有段落译文。
 
 ## 5. Provider、缓存与权限
 
 - **调度。** 页面会话维护段落优先级、去重和批次进度。Worker 校验批次大小与来源并限制并发。服务适配器负责网络超时，Google 适配器对 429 执行限次退避，有道和 AI 适配器返回限流状态。鉴权失败、配额不足和不支持的语言对返回独立错误。部分失败时保留成功译文，并允许重试失败项。
 - **契约。** `translateSegments(request, credentials, signal)` 接受带批次 ID、阅读选项及译文项 ID 的请求，以及服务凭据和取消信号。Provider 适配器校验并规范化返回值，遗漏、重复和未知 ID 不得错误回填。服务只支持按输入顺序返回时，以明确的服务契约为依据并核验返回数量与类型，异常批次不得盲配。外部请求从 Worker 发起，业务正文只发可翻译文本和必要语言参数，段落 ID 留在本地，服务协议确需关联标识时使用不含页面身份的临时标识。
 - **AI 请求。** 服务目录定义显示名称、默认模型和允许使用的接口地址。请求策略复用 Chat Completions 的请求和响应处理，可为指定模型调整推理或 JSON 参数、为流式服务接入专用解析器。 [服务目录](../alignread-extension/src/shared/ai-settings.ts) · [请求策略](../alignread-extension/src/background/translation/ai-strategies.ts)
-- **AI 响应。** DeepSeek 使用 JSON 输出模式。MiniMax、GLM 和 Kimi 使用流式响应。后台跳过推理内容，拼接译文片段后再校验。流式请求等待首次响应或连续无数据的时限为 27 秒，单次请求最多 90 秒。Worker 用批次内临时序号匹配译文，要求每个序号恰好出现一次且译文非空。修改当前服务的端点、模型或密钥后，重新开启双栏和选词。 [AI 适配器](../alignread-extension/src/background/translation/ai.ts) · [DeepSeek JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [MiniMax 流式响应](https://platform.minimax.io/docs/api-reference/text-openai-api#streaming-response)
+- **AI 响应。** DeepSeek 使用 JSON 输出模式。MiniMax、GLM 和 Kimi 使用流式响应。后台跳过推理内容，拼接译文片段后再校验。流式请求等待首次响应或连续无数据的时限为 27 秒，单次请求最多 90 秒。Worker 用批次内临时序号匹配译文，要求每个序号恰好出现一次且译文非空。修改当前服务的端点、模型或密钥后，重新开启需要的翻译功能。 [AI 适配器](../alignread-extension/src/background/translation/ai.ts) · [DeepSeek JSON 输出](https://api-docs.deepseek.com/guides/json_mode/) · [MiniMax 流式响应](https://platform.minimax.io/docs/api-reference/text-openai-api#streaming-response)
 - **缓存。** Reader 在当前路径或哈希路由内按规范化待译文本复用结果，语言方向、Provider 和配置版本由会话绑定。最近译文缓存最多 750 项或约 256 KB，敏感页面跳过缓存。设置页可关闭、查看估算占用和清空。换到其他路径或哈希路由时清空缓存，旧批次无法写回。
 - **页面权限。** 使用 `activeTab`、`scripting` 和 `storage` 管理网页翻译，`sidePanel` 用于在 PDF 旁显示译文。`file:///*` 受 Chrome 的文件网址开关控制，仅在用户打开对应 PDF 时读取该文件。站点禁用先于注入检查，受限页面显示不可用原因。
 - **外发权限。** Worker 每批次检查当前服务的授权和配置。Google、有道和官方 AI 预设使用固定 HTTPS 接口，MiniMax 的接口随所选站点变化，自定义 AI 使用用户填写的地址。保存并同意外发时仅申请对应主机的可选权限，与网页的临时访问权限独立。页面消息无法指定服务地址，请求不跟随重定向。页面 URL、Cookies、表单内容及 DOM 不进入外发请求。密钥保存在受信任的扩展存储中，设置摘要返回配置状态、公开字段及脱敏信息。 [Chrome 可选权限](https://developer.chrome.com/docs/extensions/reference/api/permissions)

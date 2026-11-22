@@ -1,15 +1,16 @@
 import type { Session } from './reader-messages';
 
 export const MAX_SELECTION_LENGTH = 1000;
+export type SelectionKind = 'selection' | 'paragraph';
 
 export type SelectionSession = Pick<Session, 'id' | 'source' | 'target'> & { shortcut?: string };
 
 export type SelectionCommand =
-  | { type: 'selection:state' | 'selection:stop' }
-  | { type: 'selection:shortcut'; sessionId: string; shortcut: string }
-  | { type: 'selection:start'; session: SelectionSession };
+  | { type: `${SelectionKind}:state` | `${SelectionKind}:stop` }
+  | { type: 'paragraph:shortcut'; sessionId: string; shortcut: string }
+  | { type: `${SelectionKind}:start`; session: SelectionSession };
 
 export type SelectionRequest =
-  | { type: 'selection:translate' | 'selection:paragraph'; sessionId: string; requestId: string; text: string }
-  | { type: 'selection:cancel' | 'selection:cancel-paragraph'; sessionId: string; requestId: string }
-  | { type: 'selection:closed'; sessionId: string };
+  | { type: `${SelectionKind}:translate`; sessionId: string; requestId: string; text: string }
+  | { type: `${SelectionKind}:cancel`; sessionId: string; requestId: string }
+  | { type: `${SelectionKind}:closed`; sessionId: string };

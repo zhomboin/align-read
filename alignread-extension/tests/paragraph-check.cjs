@@ -17,7 +17,7 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
       document.querySelector('#line1 strong').firstChild, 2, document.querySelector('#line3 a').firstChild, 3);
     window.paragraphReplies = () => Array.from(fixture.querySelectorAll('[data-alignread-paragraph]'),
       node => paragraphShadows.get(node).querySelector('[role=status]').textContent);
-    window.paragraphCalls = () => selectionMessages.filter(message => message.type === 'selection:paragraph')
+    window.paragraphCalls = () => selectionMessages.filter(message => message.type === 'paragraph:translate')
       .map(message => message.text);
     selectDialogue();
   })()`);
@@ -143,9 +143,9 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await until(async () => !(await evaluate('paragraphReplies()')).includes('译 ' + lines[1]));
   await pick('line3');
   await tap();
-  const pending = await evaluate('selectionMessages.filter(m => m.type === "selection:paragraph").at(-1).requestId');
-  await command('selection:stop');
-  assert(await evaluate(`selectionMessages.some(m => m.type === 'selection:cancel-paragraph' && m.requestId === ${JSON.stringify(pending)})`));
+  const pending = await evaluate('selectionMessages.filter(m => m.type === "paragraph:translate").at(-1).requestId');
+  await command('paragraph:stop');
+  assert(await evaluate(`selectionMessages.some(m => m.type === 'paragraph:cancel' && m.requestId === ${JSON.stringify(pending)})`));
   await evaluate('finishSelection({ok:true,value:"过期"})');
   assert.deepEqual(await evaluate('paragraphReplies()'), []);
   await pick('line1');
@@ -153,7 +153,7 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), false);
   await evaluate('selectionMode = "success"');
   await enable('first');
-  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"Alt+K"})');
+  await evaluate('selectionCommand({type:"paragraph:shortcut",sessionId:"first",shortcut:"Alt+K"})');
   await pick('line3');
   const beforeRebind = await count();
   await tap();
@@ -168,12 +168,12 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await k(1);
   await event('keyUp', 'Alt', 'AltLeft', 18);
   assert.deepEqual(await evaluate('paragraphReplies()'), [replies[2]]);
-  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"F8"})');
+  await evaluate('selectionCommand({type:"paragraph:shortcut",sessionId:"first",shortcut:"F8"})');
   await event('keyDown', 'F8', 'F8', 119);
   await event('keyUp', 'F8', 'F8', 119);
   assert.deepEqual(await evaluate('paragraphReplies()'), []);
   assert.equal(await count(), beforeRebind + 1);
-  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"Ctrl+Shift"})');
+  await evaluate('selectionCommand({type:"paragraph:shortcut",sessionId:"first",shortcut:"Ctrl+Shift"})');
   await down();
   await event('keyDown', 'Shift', 'ShiftLeft', 16, 10);
   await event('keyUp', 'Shift', 'ShiftLeft', 16, 2);
