@@ -91,13 +91,20 @@ function startWorker() {
         if (target.documentId && target.documentId !== tab?.documentId) throw Error('Document changed');
         if (!tab?.scripts?.length) throw Error('No listener in document');
         if (!tab.scripts.includes(`/${kind}.js`)) return undefined;
-        if (kind === 'selection') {
-          if (message.type === 'selection:state') return tab.selectionId ?? null;
-          if (message.type === 'selection:start') {
-            tab.selectionId = message.session.id;
+        if (kind === 'selection' || kind === 'paragraph') {
+          const field = kind === 'paragraph' ? 'paragraphId' : 'selectionId';
+          if (message.type === `${kind}:state`) return tab[field] ?? null;
+          if (message.type === 'paragraph:shortcut') {
+            assert.equal(message.sessionId, tab.paragraphId);
+            tab.shortcut = message.shortcut;
+            return null;
+          }
+          if (message.type === `${kind}:start`) {
+            if (kind === 'paragraph') tab.shortcut = message.session.shortcut;
+            tab[field] = message.session.id;
             return {ok: true, value: null};
           }
-          delete tab.selectionId;
+          delete tab[field];
           return null;
         }
         if (message.type === 'reader:start' || message.type === 'reader:switch-mode') {
@@ -388,7 +395,8 @@ async function checkBrowser() {
         result = permitted;
         if (result) message.origins.forEach(host => grants.add(host));
       } else {
-        const popup = ['page', 'switch-provider', 'start', 'control', 'selection-start', 'selection-stop'].includes(message.type);
+        const popup = ['page', 'switch-provider', 'start', 'control', 'selection-start', 'selection-stop',
+          'paragraph-start', 'paragraph-stop'].includes(message.type);
         result = await request(message, popup ? 'popup' : 'options');
       }
       await send('Runtime.evaluate', {expression: 'completeRequest(' + id + ',' + JSON.stringify(result) + ')'}, sessionId);

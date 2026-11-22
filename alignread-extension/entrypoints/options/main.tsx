@@ -4,6 +4,8 @@ import { browser } from 'wxt/browser';
 import { AI_PROVIDERS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, parseAiKey, parseAiSettings,
   type AiProviderId } from '../../src/shared/ai-settings';
 import { request } from '../../src/shared/extension';
+import { DEFAULT_PARAGRAPH_SHORTCUT } from '../../src/shared/paragraph-shortcut';
+import { ShortcutSettings } from './shortcut-settings';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
   LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
@@ -15,10 +17,10 @@ import './options.css';
 
 const emptyYoudaoCredentials: YoudaoCredentials = { appKey: '', appSecret: '' };
 const emptyStatus: ProviderStatus = { configured: false, consent: false, hostPermission: false, lastCheck: null };
-const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', sites: '站点与缓存' } as const;
-const categories = ['translation', 'reading', 'sites'] as const;
+const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', shortcuts: '快捷键', sites: '站点与缓存' } as const;
+const categories = ['translation', 'reading', 'shortcuts', 'sites'] as const;
 type Category = typeof categories[number];
-type PreferenceCategory = Exclude<Category, 'translation'>;
+type PreferenceCategory = 'reading' | 'sites';
 type ReadingPreferences = ReadingOptions & Pick<PublicSettings, 'ratio' | 'syncScroll' | 'highlight' | 'dualComments' | 'replaceComments'>;
 
 function currentCategory(): Category {
@@ -53,7 +55,7 @@ function Options() {
   const [category, setCategory] = useState(currentCategory);
   const [editor, setEditor] = useState<ProviderId>();
   const [settings, setSettings] = useState<PublicSettings>({
-    ...defaults, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
+    ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
     providers: Object.fromEntries(PROVIDER_IDS.map((provider) => [provider, emptyStatus])) as PublicSettings['providers'],
   });
   const [key, setKey] = useState('');
@@ -359,6 +361,8 @@ function Options() {
           </div>
         </section>
       )}
+      {category === 'shortcuts' && <ShortcutSettings value={settings.paragraphShortcut} disabled={busy || Boolean(loadError)}
+        onSaved={paragraphShortcut => setSettings(current => ({ ...current, paragraphShortcut }))} />}
       {category === 'reading' && <form className="preference-form" onSubmit={(event) => void save(event, 'reading')}>
         <section className="panel">
           <h3>语言与范围</h3>

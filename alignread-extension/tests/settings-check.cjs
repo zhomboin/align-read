@@ -95,6 +95,27 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
 
   await resize(320);
   assert(await noOverflow());
+  await nav('shortcuts');
+  const recordShortcut = '.shortcut-panel button[aria-pressed]';
+  const shortcutKey = (key, code, modifiers = 0, type = 'keyDown') =>
+    page('Input.dispatchKeyEvent', { type, key, code, modifiers });
+  await click(recordShortcut);
+  await until(() => evaluate('document.querySelector(".shortcut-panel button").getAttribute("aria-pressed") === "true"'));
+  await shortcutKey('Alt', 'AltLeft', 1);
+  await shortcutKey('k', 'KeyK', 1);
+  await shortcutKey('k', 'KeyK', 1, 'keyUp');
+  await shortcutKey('Alt', 'AltLeft', 0, 'keyUp');
+  await until(() => local.providerSettings.paragraphShortcut === 'Alt+K');
+  await page('Page.reload');
+  await until(() => evaluate('document.querySelector(".shortcut-panel kbd")?.textContent === "Alt+K"'));
+  await evaluate('document.querySelector(".shortcut-panel button").focus()');
+  await click(recordShortcut);
+  await shortcutKey('Escape', 'Escape');
+  await shortcutKey('Escape', 'Escape', 0, 'keyUp');
+  assert.equal(local.providerSettings.paragraphShortcut, 'Alt+K');
+  await click('.shortcut-panel button:last-of-type');
+  await until(() => local.providerSettings.paragraphShortcut === 'Ctrl');
+  assert(await noOverflow());
   await nav('reading');
   const commentFlags = () => [...document.querySelectorAll('label')].filter(label => label.textContent.includes('翻译代码注释')).map(label => label.querySelector('input'));
   assert.deepEqual(await evaluate('(' + commentFlags + ')().map(input => input.checked)'), [false, false]);

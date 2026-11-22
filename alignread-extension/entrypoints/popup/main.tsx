@@ -103,15 +103,16 @@ function Popup() {
     setPending(false);
   }
 
-  async function toggleSelection() {
+  async function toggleSelection(kind: 'selection' | 'paragraph') {
     if (tabId === undefined || provider === undefined || !page || pending) return;
-    const enable = !page.selectionEnabled;
+    const field = kind === 'paragraph' ? 'paragraphEnabled' : 'selectionEnabled';
+    const enable = !page[field];
     setPending(true);
     setError(undefined);
     const result = await request<null>(enable
-      ? { type: 'selection-start', tabId, provider, options: choice, confirmSensitive }
-      : { type: 'selection-stop', tabId });
-    if (result.ok) setPage((current) => current && ({ ...current, selectionEnabled: enable }));
+      ? { type: `${kind}-start`, tabId, provider, options: choice, confirmSensitive }
+      : { type: `${kind}-stop`, tabId });
+    if (result.ok) setPage((current) => current && ({ ...current, [field]: enable }));
     else setError(result.error);
     setPending(false);
   }
@@ -179,16 +180,27 @@ function Popup() {
         <button type="button" disabled={pending} onClick={() => void execute('stop')}>{modeLabels[readerMode].stop}</button>
       </>}
     </div>
-    <div className="actions selection-actions">
-      <button type="button" disabled={page?.selectionEnabled ? pending : blocked || Boolean(setup)}
-        aria-describedby={page?.selectionEnabled || setup || !page || page.error ? undefined : 'selection-consent'}
-        onClick={() => void toggleSelection()}>
-        {page?.selectionEnabled ? '关闭选词翻译' : '开启选词翻译'}
-      </button>
+      <div className="selection-actions">
+        <div>
+          <button type="button" disabled={page?.selectionEnabled ? pending : blocked || Boolean(setup)}
+            aria-pressed={Boolean(page?.selectionEnabled)} aria-describedby="selection-consent"
+            onClick={() => void toggleSelection('selection')}>
+            {page?.selectionEnabled ? '关闭选词翻译' : '开启选词翻译'}
+          </button>
+          <p className="selection-consent" id="selection-consent">点击「译」发送选中文字。</p>
+        </div>
+        <div>
+          <button type="button" disabled={page?.paragraphEnabled ? pending : blocked || Boolean(setup)}
+            aria-pressed={Boolean(page?.paragraphEnabled)} aria-describedby="paragraph-consent"
+            onClick={() => void toggleSelection('paragraph')}>
+            {page?.paragraphEnabled ? '关闭段落翻译' : '开启段落翻译'}
+          </button>
+          <p className="selection-consent" id="paragraph-consent">按快捷键发送选区涉及的整段正文。</p>
+          {page && <a className="shortcut-settings" href="options.html#shortcuts" target="_blank" rel="noopener noreferrer">
+            段落快捷键 · {page.settings.paragraphShortcut}
+          </a>}
+        </div>
     </div>
-    {page && !page.error && !setup && !page.selectionEnabled && <p className="selection-consent" id="selection-consent">
-      点击「译」后，选中文字会发送给当前翻译服务。
-    </p>}
     </>}
   </main>;
 }

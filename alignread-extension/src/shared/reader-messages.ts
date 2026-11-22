@@ -38,6 +38,7 @@ export type ProviderStatus = {
   appKeySuffix?: string;
 };
 export type PublicSettings = Omit<Preferences, 'authorized'> & {
+  paragraphShortcut: string;
   provider: ProviderId;
   providers: Record<ProviderId, ProviderStatus>;
   aiServices: Record<AiProviderId, AiSettings | null>;
@@ -107,7 +108,7 @@ export type ReaderState = {
   options?: ReadingOptions;
 };
 export type PageState = {
-  settings: PublicSettings; reader: ReaderState | null; selectionEnabled: boolean;
+  settings: PublicSettings; reader: ReaderState | null; selectionEnabled: boolean; paragraphEnabled: boolean;
   hostname?: string; sensitive: boolean; error?: ErrorCode;
 };
 export type TranslationItem = { id: string; text: string };
@@ -119,11 +120,12 @@ export type PopupMessage =
   | { type: 'page'; tabId: number }
   | { type: 'switch-provider'; tabId: number; provider: ProviderId }
   | (StartTranslation & { type: 'start'; mode?: ReaderMode })
-  | (StartTranslation & { type: 'selection-start' })
-  | { type: 'selection-stop'; tabId: number }
+  | (StartTranslation & { type: 'selection-start' | 'paragraph-start' })
+  | { type: 'selection-stop' | 'paragraph-stop'; tabId: number }
   | { type: 'control'; tabId: number; command: ReaderControl };
 export type OptionsMessage =
   | { type: 'settings' }
+  | { type: 'save-shortcut'; shortcut: string }
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
   | { type: 'save-youdao'; credentials?: YoudaoCredentials | null; authorized: boolean }

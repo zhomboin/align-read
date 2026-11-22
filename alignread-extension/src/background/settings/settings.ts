@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { DEFAULT_PARAGRAPH_SHORTCUT, isParagraphShortcut } from '../../shared/paragraph-shortcut';
 import {
   AI_PROVIDER_IDS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, parseAiKey, parseAiSettings,
   type AiCredentials, type AiProviderId, type AiSettings,
@@ -11,6 +12,7 @@ import {
 const KEY = 'providerSettings';
 type SavedAiService = AiCredentials & { authorized: boolean };
 export type Settings = Preferences & {
+  paragraphShortcut: string;
   provider: ProviderId;
   key: string;
   revision: string;
@@ -37,6 +39,7 @@ export async function getSettings(): Promise<Settings> {
   const aiServices: Settings['aiServices'] = { ...EMPTY_AI_SERVICES };
   for (const provider of AI_PROVIDER_IDS) aiServices[provider] = readAiService(provider, storedAi[provider]);
   return { ...normalize(saved),
+    paragraphShortcut: isParagraphShortcut(saved.paragraphShortcut) ? saved.paragraphShortcut : DEFAULT_PARAGRAPH_SHORTCUT,
     provider: isProviderId(saved.provider) ? saved.provider : 'google',
     key: typeof saved.key === 'string' ? saved.key : '',
     revision: typeof saved.revision === 'string' ? saved.revision : '',

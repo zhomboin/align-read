@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { checkParagraphPage } = require('./paragraph-check.cjs');
 
 async function checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until}) {
   const tabId = 17;
@@ -58,6 +59,21 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   assert((await popup('start', options)).ok);
   assert.equal(calls.length, initialCalls);
   const sessionId = session[`selection:${tabId}`].session.id;
+  assert.equal((await pageState()).paragraphEnabled, false);
+  assert.deepEqual(await send('paragraph:translate', { sessionId, requestId: 'wrong-mode', text: 'words' }), { ok: false, error: 'stale' });
+  assert((await popup('paragraph-start', options)).ok);
+  const paragraphId = session[`paragraph:${tabId}`].session.id;
+  assert.notEqual(paragraphId, sessionId);
+  assert.equal(tab.shortcut, 'Ctrl');
+  const saveShortcut = shortcut => dispatch({ type: 'save-shortcut', shortcut },
+    { url: 'chrome-extension://alignread-test/options.html#shortcuts' });
+  assert.deepEqual(await saveShortcut('Alt+K'), { ok: true, value: 'Alt+K' });
+  assert.equal(tab.shortcut, 'Alt+K');
+  assert.equal(tab.selectionId, sessionId);
+  assert.equal((await pageState()).settings.paragraphShortcut, 'Alt+K');
+  assert.equal((await saveShortcut('Ctrl+Ctrl+K')).ok, false);
+  assert.equal((await saveShortcut('Ctrl+Unidentified')).ok, false);
+  assert.equal((await pageState()).settings.paragraphShortcut, 'Alt+K');
   const item = {sessionId, requestId: 'selected-item', text: '  Selected words only  '};
   const translate = (changes, from) => send('selection:translate', {...item, ...changes}, from);
   for (const from of [
@@ -73,6 +89,22 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   tab.url = previousUrl;
   assert.equal(calls.length, initialCalls);
 
+  tab.url = previousUrl + '#SQL-SYNTAX-IDENTIFIERS';
+  assert.equal((await pageState()).selectionEnabled, true);
+  assert.equal((await translate({}, { ...sender(), url: previousUrl })).ok, true);
+  const atAnchor = calls.length;
+  tab.selectionId = undefined;
+  assert.equal((await pageState()).selectionEnabled, false);
+  assert.deepEqual(await translate(), { ok: false, error: 'stale' });
+  tab.selectionId = sessionId;
+  for (const suffix of ['?page=2#section', '#/login', '#!%2Faccount', '#%ZZ']) {
+    tab.url = previousUrl + suffix;
+    assert.equal((await pageState()).selectionEnabled, false);
+    assert.deepEqual(await translate({}, { ...sender(), url: previousUrl }), { ok: false, error: 'stale' });
+  }
+  assert.equal(calls.length, atAnchor);
+  tab.url = previousUrl;
+
   assert.deepEqual(await translate(), {ok: true, value: 'Mock: Selected words only'});
   const sent = calls.at(-1).options;
   assert.deepEqual(sent.body.getAll('q'), ['Selected words only']);
@@ -82,28 +114,60 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   assert.equal(sent.referrerPolicy, 'no-referrer');
   assert(!JSON.stringify(session).includes('Selected words only'));
 
+  const paragraph = (text, requestId = 'para') => send('paragraph:translate', { sessionId: paragraphId, requestId, text });
+  assert.equal((await paragraph('a'.repeat(1200))).value, 'Mock: ' + 'a'.repeat(1200));
+  assert.deepEqual(await paragraph('a'.repeat(4501)), { ok: false, error: 'invalid-response' });
+  assert.deepEqual(await send('paragraph:translate', { ...item, sessionId: paragraphId }, { ...sender(), documentId: 'wrong' }), { ok: false, error: 'stale' });
+  const beforeParagraph = calls.length;
+  const slowParagraph = paragraph('Pending before navigation');
+  await until(() => calls.length > beforeParagraph);
+  assert.equal((await translate()).ok, true);
+  assert.equal(calls[beforeParagraph].options.signal.aborted, false);
+  assert((await send('paragraph:cancel', { sessionId: paragraphId, requestId: 'para' })).ok);
+  assert.deepEqual(await slowParagraph, { ok: false, error: 'stale' });
+  assert.deepEqual(await send('selection:translate', { ...item, sessionId: paragraphId }), { ok: false, error: 'stale' });
+
   const callsBefore = calls.length;
   const pending = translate({requestId: 'pending', text: 'Pending before navigation'});
   await until(() => calls.length > callsBefore);
+  assert((await popup('paragraph-stop')).ok);
+  assert.equal((await pageState()).selectionEnabled, true);
+  assert.equal(calls[callsBefore].options.signal.aborted, false);
+  assert.deepEqual(await paragraph('Disabled'), { ok: false, error: 'stale' });
   assert((await send('selection:cancel', {sessionId, requestId: 'pending'})).ok);
   assert.deepEqual(await pending, {ok: false, error: 'stale'});
   assert(session[`reader:${tabId}`]);
+  assert((await popup('paragraph-start', options)).ok);
+  const newParagraphId = tab.paragraphId;
+  const beforeStop = calls.length;
+  const stillTranslating = send('paragraph:translate', { sessionId: newParagraphId, requestId: 'keep', text: 'Pending before navigation' });
+  await until(() => calls.length > beforeStop);
   assert((await popup('selection-stop')).ok);
+  assert.equal(calls[beforeStop].options.signal.aborted, false);
+  assert((await send('paragraph:cancel', { sessionId: newParagraphId, requestId: 'keep' })).ok);
+  assert.deepEqual(await stillTranslating, { ok: false, error: 'stale' });
   assert.equal((await pageState()).selectionEnabled, false);
   assert.deepEqual(await translate(), {ok: false, error: 'stale'});
+  assert.equal((await pageState()).paragraphEnabled, true);
+  assert.equal((await send('paragraph:translate', { sessionId: newParagraphId, requestId: 'only', text: 'Only a paragraph' })).ok, true);
   assert(session[`reader:${tabId}`]);
 
   assert((await start()).ok);
   const preference = (await request({type: 'settings'})).value;
+  assert.equal(tab.shortcut, 'Alt+K');
   const saveDisabled = (disabledSites) => request({type: 'save', preferences: {...preference, disabledSites}});
   assert((await saveDisabled(['selection.example.test'])).ok);
   assert.deepEqual(await start(), {ok: false, error: 'site-disabled'});
   assert.equal((await pageState()).selectionEnabled, false);
+  assert.equal((await pageState()).paragraphEnabled, false);
   assert((await saveDisabled([])).ok);
+  assert((await popup('paragraph-start', options)).ok);
   assert((await start()).ok);
   await request({type: 'select-provider', provider: 'google'});
   assert.equal((await pageState()).selectionEnabled, false);
   assert.equal(session[`selection:${tabId}`], undefined);
+  assert.equal((await pageState()).paragraphEnabled, false);
+  assert.equal(session[`paragraph:${tabId}`], undefined);
   await request({type: 'reset'});
   tabs.delete(tabId);
   console.log('Selection Worker passed explicit authorization, sensitive and disabled pages, tab/document isolation, request shape, and cancellation.');
@@ -132,6 +196,7 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   await evaluate('(' + initSelection.toString() + ')()');
   await evaluate(fs.readFileSync(path.join(build, 'selection.js'), 'utf8'));
 
+  await evaluate(fs.readFileSync(path.join(build, 'paragraph.js'), 'utf8'));
   const command = (type, session) => evaluate(`selectionCommand(${JSON.stringify({type, session})})`);
   const enable = (id) => command('selection:start', {id, source: 'en', target: 'zh-CN'});
   const pick = (id, start, end) => evaluate(`{
@@ -222,6 +287,18 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   assert((await content('status')).includes('选区过长'));
   assert.equal((await requests()).length, beforeExcluded);
 
+  await pick('source', 2, 8);
+  await key('Control', 17);
+  assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), false);
+  const enableParagraph = id => command('paragraph:start', { id, source: 'en', target: 'zh-CN' });
+  await enableParagraph('first');
+  await command('selection:stop');
+  assert.equal(await command('paragraph:state'), 'first');
+  assert.equal(await evaluate('!!document.querySelector("[data-alignread-selection]")'), false);
+  await checkParagraphPage({ page, evaluate, until, pick, command, enable: enableParagraph });
+  await enable('first');
+  assert.equal(await command('paragraph:state'), 'first');
+
   await page('Emulation.setDeviceMetricsOverride', {width: 1280, height: 800, deviceScaleFactor: 1, mobile: false});
   const reader = await evaluate(`readerCommand({type:'reader:start',session:{id:'dual',source:'en',target:'zh-CN',range:'main',
     ratio:0.5,syncScroll:true,highlight:true,cache:true}})`);
@@ -253,9 +330,24 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   await until(() => visible('trigger'));
   await evaluate('readerCommand({type:"reader:stop"})');
   assert.equal(await command('selection:state'), 'first');
+  await pick('source', 2, 8);
+  await key('Control', 17);
+  await until(() => evaluate('!!document.querySelector("[data-alignread-paragraph]")'));
+  await evaluate('location.hash = "second"');
+  await until(() => evaluate('location.hash === "#second"'));
+  assert.equal(await command('selection:state'), 'first');
+  assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), true);
+  await pick('second', 0, 6);
+  await key('Control', 17);
+  await until(() => evaluate('document.querySelector("#second").nextElementSibling.hasAttribute("data-alignread-paragraph")'));
+  await evaluate('history.back()');
+  await until(() => evaluate('location.hash === ""'));
+  assert.equal(await command('selection:state'), 'first');
   await evaluate('location.hash = "next"');
   await until(async () => (await command('selection:state')) === null);
   assert.equal(await evaluate('!!document.querySelector("[data-alignread-selection]")'), false);
+  assert.equal(await command('paragraph:state'), null);
+  assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), false);
   console.log('Selection UI passed AC-P1-01, preserved selections, retry/copy/close, excluded content, stale responses, and dual-pane coexistence.');
 }
 
@@ -264,6 +356,8 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   tabs.set(tabId, tab);
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
   const button = 'document.querySelector(".selection-actions button")';
+  const paragraphButton = 'document.querySelectorAll(".selection-actions button")[1]';
+  const paragraphLabel = () => evaluate(paragraphButton + '.textContent.trim()');
   const service = 'document.querySelector(".provider-field select")';
   const primary = 'document.querySelector("button.primary")';
   const label = () => evaluate(button + '?.textContent.trim()');
@@ -271,6 +365,7 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   const serviceOptions = () => evaluate(`Array.from(${service}.options, option => option.value)`);
   await until(() => evaluate('document.body?.textContent.includes("配置翻译服务")'));
   assert(await evaluate(button + '.disabled'));
+  assert(await evaluate(paragraphButton + '.disabled'));
   assert(await evaluate(service + '.disabled'));
   assert.deepEqual(await serviceOptions(), ['']);
   assert.deepEqual(await request({type: 'switch-provider', tabId, provider: 'youdao'}, 'popup'),
@@ -286,6 +381,11 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   assert((await evaluate('document.getElementById(' + button + '.getAttribute("aria-describedby")).textContent')).includes('选中文字'));
 
   const count = calls.length;
+  assert.equal(await paragraphLabel(), '开启段落翻译');
+  await evaluate(paragraphButton + '.click()');
+  await until(async () => (await paragraphLabel()) === '关闭段落翻译');
+  assert.equal(await label(), '开启选词翻译');
+  const paragraphId = tab.paragraphId;
   await evaluate(button + '.click()');
   await until(async () => (await label()) === '关闭选词翻译');
   assert(tab.selectionId);
@@ -294,6 +394,10 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
   await evaluate(button + '.click()');
   await until(async () => (await label()) === '开启选词翻译');
   assert.equal(tab.selectionId, undefined);
+  assert.equal(await paragraphLabel(), '关闭段落翻译');
+  assert.equal(tab.paragraphId, paragraphId);
+  await evaluate(paragraphButton + '.click()');
+  await until(async () => (await paragraphLabel()) === '开启段落翻译');
 
   await evaluate(`fill(document.querySelector('.language-fields label:nth-child(2) select'), 'ja', 'change')`);
   await evaluate(primary + '.click()');
@@ -324,9 +428,11 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
 function initSelection() {
   const attach = Element.prototype.attachShadow;
   window.selectionShadow = null;
+  window.paragraphShadows = new WeakMap();
   Element.prototype.attachShadow = function (options) {
     const root = attach.call(this, options);
     if (this.hasAttribute('data-alignread-selection')) window.selectionShadow = root;
+    if (this.hasAttribute('data-alignread-paragraph')) paragraphShadows.set(this, root);
     return root;
   };
   window.pick = (id, start, end) => {
@@ -348,14 +454,18 @@ function initSelection() {
   window.selectionMessages = [];
   window.selectionMode = 'success';
   const previous = chrome.runtime;
+  const listeners = [];
   chrome.runtime = {...previous,
     onMessage: {addListener(listener) {
-      window.selectionCommand = (message) => new Promise(resolve => listener(message, {id: previous.id}, resolve));
+      listeners.push(listener);
+      window.selectionCommand = message => new Promise(resolve => {
+        for (const receive of listeners) receive(message, { id: previous.id }, resolve);
+      });
     }},
     async sendMessage(message) {
-      if (!message.type.startsWith('selection:')) return previous.sendMessage(message);
+      if (!/^(selection|paragraph):/.test(message.type)) return previous.sendMessage(message);
       selectionMessages.push(message);
-      if (message.type !== 'selection:translate') return {ok: true};
+      if (!['selection:translate', 'paragraph:translate'].includes(message.type)) return { ok: true };
       if (selectionMode === 'slow') return new Promise(resolve => { window.finishSelection = resolve; });
       if (selectionMode === 'error') return {ok: false, error: 'network'};
       return {ok: true, value: '译 ' + message.text};

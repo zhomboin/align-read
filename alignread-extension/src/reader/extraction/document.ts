@@ -46,7 +46,7 @@ const excluded = [
   'input', 'textarea', 'select', 'button:not([role=tablist] [role=tab])', 'form', 'option',
   '[contenteditable]:not([contenteditable=false])',
   '[role=textbox]', '[role=button]', '[role=combobox]', '[aria-hidden=true]', '[hidden]',
-  '[data-alignread-host]', '[data-ad-slot]', '[inert]', '.monaco-editor', '.CodeMirror', '.cm-editor',
+  '[data-alignread-host]', '[data-alignread-paragraph]', '[data-ad-slot]', '[inert]', '.monaco-editor', '.CodeMirror', '.cm-editor',
 ].join(',');
 const codeTextSelector = 'pre,code,kbd,samp,[role~=code]';
 const replacementExcluded = [

@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { DEFAULT_PARAGRAPH_SHORTCUT, isParagraphShortcut } from '../src/shared/paragraph-shortcut';
 import {
   getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, providerConsent,
   providerOrigin, publicSettings, removeUnusedProviderPermissions, sameCredentials, updateSettings, type Settings,
@@ -8,16 +9,17 @@ import { translateWithProvider } from '../src/background/translation/dispatch';
 import { aiStrategy } from '../src/background/translation/ai-strategies';
 import { EMPTY_AI_SERVICES, isAiProviderId, parseAiKey, parseAiSettings } from '../src/shared/ai-settings';
 import { readReaderPage } from '../src/shared/reader-page';
+import { sameSelectionPage } from '../src/shared/selection-page';
 import {
   LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReaderMode, isReadingOptions, isRecord,
   isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
 } from '../src/shared/reader-messages';
-import { MAX_SELECTION_LENGTH, type SelectionCommand, type SelectionRequest } from '../src/shared/selection-messages';
+import { MAX_SELECTION_LENGTH, type SelectionCommand, type SelectionKind, type SelectionRequest } from '../src/shared/selection-messages';
 
 type Grant = { session: Session; documentId: string; hostname: string; revision: string; provider: ProviderId; pageUrl?: string };
-type SessionKind = 'reader' | 'selection';
+type SessionKind = 'reader' | SelectionKind;
 type Batch = Extract<ReaderRequest, { type: 'batch' }>;
 type Job = { sessionId: string; batchId: string; controller: AbortController; promise: ReturnType<typeof translate> };
 const jobs = new Map<string, Job>();
@@ -38,10 +40,10 @@ export default defineBackground(() => {
         ? popup(command) : onTab(command.tabId, () => popup(command));
     } else if (sender.url?.split('#')[0] === browser.runtime.getURL('/pdf.html') && message.type === 'settings') {
       response = options({ type: 'settings' });
-    } else if (sender.url === browser.runtime.getURL('/options.html')) {
+    } else if (sender.url?.split('#')[0] === browser.runtime.getURL('/options.html')) {
       response = options(message as unknown as OptionsMessage);
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
-      response = typeof message.type === 'string' && message.type.startsWith('selection:')
+      response = typeof message.type === 'string' && /^(selection|paragraph):/.test(message.type)
         ? selection(sender.tab.id, sender.documentId, sender.url, message as unknown as SelectionRequest)
         : reader(sender.tab.id, sender.documentId, sender.url, message as unknown as ReaderRequest);
     }
@@ -51,7 +53,7 @@ export default defineBackground(() => {
   });
 
   browser.tabs.onRemoved.addListener((tabId) => {
-    void onTab(tabId, () => Promise.all([clearGrant(tabId, 'reader'), clearGrant(tabId, 'selection')]))
+    void onTab(tabId, () => Promise.all([clearGrant(tabId, 'reader'), clearGrant(tabId, 'selection'), clearGrant(tabId, 'paragraph')]))
       .catch(() => undefined);
   });
   browser.permissions.onRemoved.addListener(({ origins }) => {
@@ -99,7 +101,7 @@ function cancelSessionJob(key: string, sessionId: string) {
 async function stopSessions(matches: (grant: Grant) => boolean) {
   const stored = await browser.storage.session.get(null);
   await Promise.all(Object.entries(stored).map(async ([key, value]) => {
-    const parts = /^(reader|selection):(\d+)$/.exec(key);
+    const parts = /^(reader|selection|paragraph):(\d+)$/.exec(key);
     if (!parts) return;
     const kind = parts[1] as SessionKind;
     const tabId = Number(parts[2]);
@@ -146,6 +148,26 @@ async function options(message: OptionsMessage) {
   switch (message.type) {
     case 'settings':
       return success(await publicSettings(await getSettings()));
+    case 'save-shortcut': {
+      if (!isParagraphShortcut(message.shortcut)) return failure('unavailable');
+      await updateSettings(current => ({ ...current, paragraphShortcut: message.shortcut }));
+      const grants = await browser.storage.session.get(null);
+      const tabs = new Set(tabCommands.keys());
+      for (const key of Object.keys(grants)) {
+        const match = /^paragraph:(\d+)$/.exec(key);
+        if (match) tabs.add(Number(match[1]));
+      }
+      await Promise.all([...tabs].map(tabId => onTab(tabId, async () => {
+        const grant = await getGrant(tabId, 'paragraph');
+        if (!grant) return;
+        const { paragraphShortcut } = await getSettings();
+        await send(tabId, grant.documentId, {
+          type: 'paragraph:shortcut', sessionId: grant.session.id,
+          shortcut: paragraphShortcut
+        }).catch(() => undefined);
+      })));
+      return success((await getSettings()).paragraphShortcut);
+    }
     case 'save': {
       if (!isReadingOptions(message.preferences)) return failure('unavailable');
       const { cache, disabledSites, authorized: _authorized, ...reading } = normalize(message.preferences);
@@ -227,7 +249,8 @@ async function options(message: OptionsMessage) {
       const settings = await updateSettings((current) => {
         origins = PROVIDER_IDS.map((provider) => providerOrigin(current, provider));
         return {
-          ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
+          ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT,
+          provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
           aiServices: { ...EMPTY_AI_SERVICES }, checks: {},
         };
       });
@@ -288,24 +311,31 @@ async function popup(message: PopupMessage) {
   const sensitive = readReaderPage(tab.url)?.sensitive ?? false;
 
   if (message.type === 'page') {
-    const grant = available && !disabled ? await getGrant(tabId, 'selection') : undefined;
-    const [reader, selectionId] = await Promise.all([
+    async function enabled(kind: SelectionKind) {
+      if (!available || disabled) return false;
+      const grant = await getGrant(tabId, kind);
+      if (!grant || !sameSelectionPage(grant.pageUrl, tab.url)) return false;
+      const active = await send(tabId, grant.documentId, { type: `${kind}:state` }).catch(() => null);
+      return active === grant.session.id;
+    }
+    const [reader, selectionEnabled, paragraphEnabled] = await Promise.all([
       available ? browser.tabs.sendMessage(tabId, { type: 'reader:state' } satisfies ReaderCommand, { frameId: 0 })
         .catch(() => null) as Promise<ReaderState | null> : null,
-      grant && grant.pageUrl === tab.url ? send(tabId, grant.documentId, { type: 'selection:state' }).catch(() => null) : null,
+      enabled('selection'), enabled('paragraph'),
     ]);
     return success<PageState>({
-      settings: view, reader, selectionEnabled: Boolean(grant && selectionId === grant.session.id),
+      settings: view, reader, selectionEnabled, paragraphEnabled,
       hostname: url?.hostname, sensitive,
       error: !available ? 'unsupported-page' : disabled ? 'site-disabled' : undefined,
     });
   }
 
-  if (message.type === 'selection-stop') {
-    const grant = await getGrant(tabId, 'selection');
+  if (message.type === 'selection-stop' || message.type === 'paragraph-stop') {
+    const kind = message.type === 'selection-stop' ? 'selection' : 'paragraph';
+    const grant = await getGrant(tabId, kind);
     if (grant) {
-      await clearGrant(tabId, 'selection', grant.session.id);
-      await send(tabId, grant.documentId, { type: 'selection:stop' }).catch(() => undefined);
+      await clearGrant(tabId, kind, grant.session.id);
+      await send(tabId, grant.documentId, { type: `${kind}:stop` }).catch(() => undefined);
     }
     return success(null);
   }
@@ -320,13 +350,13 @@ async function popup(message: PopupMessage) {
     }).catch(() => null));
   }
 
-  if ((message.type !== 'start' && message.type !== 'selection-start') || !isReadingOptions(message.options)) {
+  if ((message.type !== 'start' && message.type !== 'selection-start' && message.type !== 'paragraph-start') || !isReadingOptions(message.options)) {
     return failure('unavailable');
   }
   if (message.type === 'start' && message.mode !== undefined && !isReaderMode(message.mode)) {
     return failure('unavailable');
   }
-  const kind = message.type === 'start' ? 'reader' : 'selection';
+  const kind = message.type === 'start' ? 'reader' : message.type === 'selection-start' ? 'selection' : 'paragraph';
   if (!available) return failure('unsupported-page');
   if (disabled) return failure('site-disabled');
   if (message.provider !== settings.provider) return failure('provider-changed');
@@ -376,7 +406,9 @@ async function popup(message: PopupMessage) {
       provider: settings.provider, pageUrl: tab.url } satisfies Grant,
   });
   try {
-    const result = await send(tabId, documentId, { type: `${kind}:start`, session });
+    const result = await send(tabId, documentId, kind === 'paragraph'
+      ? { type: 'paragraph:start', session: { ...session, shortcut: current.paragraphShortcut } }
+      : { type: `${kind}:start`, session });
     if (!result?.ok) await clearGrant(tabId, kind, session.id);
     return result;
   } catch {
@@ -473,26 +505,29 @@ async function switchReaderSession(tabId: number, grant: Grant, session: Session
 }
 
 async function selection(tabId: number, documentId: string, url: string | undefined, message: SelectionRequest) {
-  const grant = await getGrant(tabId, 'selection');
+  const kind = message.type.startsWith('paragraph:') ? 'paragraph' : 'selection';
+  const grant = await getGrant(tabId, kind);
   if (!grant || grant.documentId !== documentId || grant.session.id !== message.sessionId) return failure('stale');
-  if (message.type === 'selection:closed') {
-    await onTab(tabId, () => clearGrant(tabId, 'selection', message.sessionId));
+  if (message.type === 'selection:closed' || message.type === 'paragraph:closed') {
+    await onTab(tabId, () => clearGrant(tabId, kind, message.sessionId));
     return success(null);
   }
-  if (message.type === 'selection:cancel') {
-    const job = jobs.get(grantKey(tabId, 'selection'));
+  const key = grantKey(tabId, kind);
+  if (message.type === 'selection:cancel' || message.type === 'paragraph:cancel') {
+    const job = jobs.get(key);
     if (job?.sessionId === grant.session.id && job.batchId === message.requestId) job.controller.abort();
     return success(null);
   }
-  if (message.type !== 'selection:translate' || !url || url !== grant.pageUrl) return failure('stale');
+  if ((message.type !== 'selection:translate' && message.type !== 'paragraph:translate') ||
+    !sameSelectionPage(grant.pageUrl, url)) return failure('stale');
   if (typeof message.requestId !== 'string' || typeof message.text !== 'string' ||
-      message.text.length > MAX_SELECTION_LENGTH) return failure('invalid-response');
+    message.text.length > (kind === 'paragraph' ? LIMITS.batchChars : MAX_SELECTION_LENGTH)) return failure('invalid-response');
   const batch: Batch = {
     type: 'batch', sessionId: message.sessionId, batchId: message.requestId,
     items: [{ id: message.requestId, text: message.text.trim() }],
   };
   if (!validItems(batch.items)) return failure('invalid-response');
-  const result = await queueBatch(tabId, 'selection', grant, batch);
+  const result = await queueBatch(tabId, kind, grant, batch);
   if (!result.ok) return result;
   const item = result.value.items[0];
   if (result.value.id !== message.requestId || item?.id !== message.requestId || !item.text.trim()) {
@@ -540,7 +575,14 @@ async function translate(tabId: number, kind: SessionKind, grant: Grant, message
     return failure('stale');
   }
   if (!(await hasProviderPermission(settings, provider))) return failure('consent-required');
-  if (kind === 'selection' && (await browser.tabs.get(tabId)).url !== grant.pageUrl) return failure('stale');
+  if (kind !== 'reader') {
+    const { url } = await browser.tabs.get(tabId);
+    if (!sameSelectionPage(grant.pageUrl, url)) return failure('stale');
+    if (url !== grant.pageUrl) {
+      const active = await send(tabId, grant.documentId, { type: `${kind}:state` }).catch(() => null);
+      if (active !== grant.session.id) return failure('stale');
+    }
+  }
   if (signal.aborted || (await getSettings()).revision !== grant.revision) return failure('stale');
   if (kind === 'reader') {
     const pageFailure = await verifyReaderPage(tabId, grant, message.pageUrl);
