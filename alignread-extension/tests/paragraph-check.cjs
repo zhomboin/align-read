@@ -44,13 +44,41 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await evaluate('selectionMode = "slow"');
   await tap();
   await until(async () => await count() === 1);
+  assert.deepEqual(await evaluate('paragraphReplies()'), ['正在翻译…', '等待翻译…', '等待翻译…']);
+  const spinner = `(() => {
+    const root = paragraphShadows.get(document.querySelector('#line1').nextSibling);
+    const feedback = root.querySelector('.feedback');
+    const style = getComputedStyle(feedback, '::before');
+    const box = feedback.getBoundingClientRect();
+    return { animation: style.animationName, visible: box.height > 0 && box.width > 0 && parseFloat(style.width) > 0 };
+  })()`;
+  assert.deepEqual(await evaluate(spinner), { animation: 'spin', visible: true });
+  await page('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  assert.deepEqual(await evaluate(spinner), { animation: 'none', visible: true });
+  await page('Emulation.setEmulatedMedia', { features: [] });
   await tap();
   assert.equal(await count(), 1);
-  await evaluate('getSelection().removeAllRanges(); selectionMode = "success"; finishSelection({ok:true,value:"第一句译文"})');
+  await evaluate('getSelection().removeAllRanges(); finishSelection({ok:true,value:"第一句译文"})');
+  await until(async () => await count() === 2);
+  assert.deepEqual(await evaluate('paragraphReplies()'), ['第一句译文', '正在翻译…', '等待翻译…']);
+  await evaluate('selectionMode = "success"; finishSelection({ok:false,error:"timeout"})');
   await until(async () => await count() === 3);
   const lines = ['First speaker asks a question.', 'Second speaker answers.', 'Third speaker agrees.'];
   assert.deepEqual(await evaluate('paragraphCalls()'), lines);
   const replies = ['第一句译文', '译 ' + lines[1], '译 ' + lines[2]];
+  const retry = 'paragraphShadows.get(document.querySelector("#line2").nextSibling).querySelector("button")';
+  const partial = await evaluate('paragraphReplies()');
+  assert.equal(partial[0], replies[0]);
+  assert.match(partial[1], /翻译失败.*超时/);
+  assert.equal(partial[2], replies[2]);
+  assert(await evaluate(retry + '.getBoundingClientRect().width > 0'));
+  await evaluate('selectionMode = "slow";' + retry + '.focus()');
+  await event('keyDown', 'Enter', 'Enter', 13);
+  await event('keyUp', 'Enter', 'Enter', 13);
+  await until(async () => await count() === 4);
+  assert.deepEqual(await evaluate('paragraphReplies()'), [replies[0], '正在翻译…', replies[2]]);
+  assert(await evaluate(retry + '.hidden'));
+  await evaluate('selectionMode = "success"; finishSelection({ok:true,value:' + JSON.stringify(replies[1]) + '})');
   assert.deepEqual(await evaluate('paragraphReplies()'), replies);
   assert.deepEqual(await evaluate(`['line1','line2','line3'].map(id => {
     const original = document.getElementById(id);
@@ -61,12 +89,12 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await evaluate('selectDialogue()');
   await tap();
   assert.deepEqual(await evaluate('paragraphReplies()'), []);
-  assert.equal(await count(), 3);
+  assert.equal(await count(), 4);
 
   await pick('breaks');
   await tap();
   const brokenLines = ['Hello!', 'How are you?', 'Very well.'];
-  assert.deepEqual(await evaluate('paragraphCalls().slice(3)'), brokenLines);
+  assert.deepEqual(await evaluate('paragraphCalls().slice(4)'), brokenLines);
   assert.deepEqual(await evaluate(`(() => {
     const p = document.querySelector('#breaks');
     const hosts = [...p.querySelectorAll('br')].map(br => br.nextSibling).concat(p.nextSibling);
@@ -91,8 +119,8 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await evaluate('selectionMode = "error"');
   await pick('line2', 0, 4);
   await tap();
-  const retry = 'paragraphShadows.get(document.querySelector("#line2").nextSibling).querySelector("button")';
   await until(() => evaluate('!' + retry + '.hidden'));
+  assert.match((await evaluate('paragraphReplies()'))[0], /翻译失败.*网络/);
   await evaluate('selectionMode = "success";' + retry + '.focus()');
   await event('keyDown', 'Enter', 'Enter', 13);
   await event('keyUp', 'Enter', 'Enter', 13);

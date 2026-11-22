@@ -5,11 +5,12 @@ import { createPanel } from './panel';
 import { startParagraphs } from './paragraphs';
 import { readSelection, sameSelection, type SelectedText } from './source';
 
-function send<T>(message: SelectionRequest): Promise<Result<T>> {
-  return browser.runtime.sendMessage(message).then(
-    (result: Result<T> | undefined) => result ?? failure('unavailable'),
-    () => failure('unavailable'),
-  );
+async function send<T>(message: SelectionRequest): Promise<Result<T>> {
+  try {
+    return (await browser.runtime.sendMessage(message) as Result<T> | undefined) ?? failure('unavailable');
+  } catch {
+    return failure('unavailable');
+  }
 }
 
 export function startSelection(session: SelectionSession, onStop: () => void) {

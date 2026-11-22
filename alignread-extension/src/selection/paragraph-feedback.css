@@ -1,0 +1,61 @@
+:host {
+  margin-block: .25em .5em;
+  font-weight: normal;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.feedback:not([data-state="done"]) {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  padding: 3px 9px;
+  border: 1px solid #b7cec2;
+  border-radius: 6px;
+  background: #edf6f0;
+  color: #264e3b;
+  font: 14px/1.5 system-ui, sans-serif;
+}
+
+.feedback[data-state="queued"]::before,
+.feedback[data-state="loading"]::before {
+  content: "";
+  box-sizing: border-box;
+  inline-size: 13px;
+  block-size: 13px;
+  border: 2px dotted currentColor;
+  border-radius: 50%;
+}
+
+.feedback[data-state="loading"]::before {
+  border-style: solid;
+  border-inline-end-color: transparent;
+  animation: spin .8s linear infinite;
+}
+
+.feedback[data-state="error"] {
+  border-color: #d8aba2;
+  background: #fff1ed;
+  color: #812f21;
+}
+
+button {
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible { outline: 2px solid currentColor; }
+@keyframes spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .feedback[data-state="loading"]::before { animation: none; }
+}

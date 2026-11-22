@@ -1,15 +1,13 @@
-import { errors, type Result } from '../shared/reader-messages';
+import type { Result } from '../shared/reader-messages';
 import type { SelectionRequest, SelectionSession } from '../shared/selection-messages';
 import { splitText } from '../shared/split-text';
 import { onControlTap } from './control-key';
+import { createParagraphFeedback } from './paragraph-feedback';
 import { matchesParagraph, selectedParagraphs, type Paragraph } from './paragraph-source';
 
 type Entry = {
   source: Paragraph;
-  host: HTMLElement;
-  status: HTMLElement;
-  retry: HTMLButtonElement;
-  pending: boolean;
+  view: ReturnType<typeof createParagraphFeedback>;
   requestId?: string;
 };
 
@@ -21,11 +19,11 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
 
   function remove(entry: Entry) {
     entries.delete(entry.source.first);
-    entry.host.remove();
+    entry.view.host.remove();
     if (entry.requestId) void send({ type: 'selection:cancel-paragraph', sessionId: session.id, requestId: entry.requestId });
   }
 
-  function attached({ source, host }: Entry) {
+  function attached({ source, view: { host } }: Entry) {
     if (!host.isConnected || host.parentElement !== source.parent) return false;
     if (!source.anchor) return source.parent.lastChild === host;
     return (source.after ? host.previousSibling : host.nextSibling) === source.anchor;
@@ -39,56 +37,37 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
   }
 
   async function translate(entry: Entry) {
+    if (!current(entry)) return;
+    entry.view.loading();
     const translated: string[] = [];
     for (const part of splitText(entry.source.text)) {
-      if (!current(entry)) return;
       const requestId = String(++sequence);
       entry.requestId = requestId;
       const result = await send<string>({ type: 'selection:paragraph', sessionId: session.id, requestId, text: part });
       entry.requestId = undefined;
       if (!current(entry)) return;
       if (!result.ok) {
-        entry.status.textContent = errors[result.error];
-        entry.retry.hidden = result.error === 'stale';
-        entry.pending = false;
+        entry.view.failed(result.error);
         return;
       }
       translated.push(result.value);
     }
-    entry.status.lang = session.target;
     const separator = ['zh-CN', 'zh-TW', 'ja', 'th'].includes(session.target) ? '' : ' ';
-    entry.status.textContent = translated.join(separator);
-    entry.pending = false;
+    entry.view.done(translated.join(separator));
   }
 
   function enqueue(entry: Entry) {
-    entry.pending = true;
-    entry.retry.hidden = true;
-    entry.status.textContent = '正在翻译…';
+    entry.view.queued();
     queue = queue.then(() => translate(entry));
   }
 
   function insert(source: Paragraph) {
-    const host = document.createElement('span');
-    host.setAttribute('data-alignread-paragraph', '');
-    host.translate = false;
-    host.style.setProperty('display', 'block', 'important');
-    const shadow = host.attachShadow({ mode: 'closed' });
-    const style = document.createElement('style');
-    style.textContent = ':host{margin-block:.25em .5em;font-weight:normal;text-align:start;overflow-wrap:anywhere}';
-    const status = document.createElement('span');
-    status.dir = 'auto';
-    status.setAttribute('role', 'status');
-    const retry = document.createElement('button');
-    retry.type = 'button';
-    retry.textContent = '重试';
-    retry.setAttribute('aria-label', '重试本段翻译');
-    shadow.append(style, status, retry);
-    const entry: Entry = { source, host, status, retry, pending: false };
-    retry.addEventListener('click', event => {
-      if (event.isTrusted && !entry.pending && current(entry)) enqueue(entry);
+    const view = createParagraphFeedback(session.target);
+    const entry: Entry = { source, view };
+    view.retry.addEventListener('click', event => {
+      if (event.isTrusted && !view.pending && current(entry)) enqueue(entry);
     });
-    source.parent.insertBefore(host, source.after ? source.anchor?.nextSibling ?? null : source.anchor);
+    source.parent.insertBefore(view.host, source.after ? source.anchor?.nextSibling ?? null : source.anchor);
     entries.set(source.first, entry);
     enqueue(entry);
   }
@@ -98,7 +77,7 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     const sources = selectedParagraphs();
     const allShown = sources.length > 0 && sources.every(source => {
       const entry = entries.get(source.first);
-      return entry && current(entry) && !entry.pending && entry.retry.hidden;
+      return entry && current(entry) && !entry.view.pending && entry.view.retry.hidden;
     });
     for (const source of sources) {
       const entry = entries.get(source.first);
