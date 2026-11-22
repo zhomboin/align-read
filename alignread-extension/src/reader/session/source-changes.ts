@@ -2,7 +2,7 @@ import type { Article } from '../extraction/document';
 
 const readingContainers = 'main,article,[role=main],dialog[open],[role=dialog],[data-reading-mode]';
 const pageChrome = 'header,nav,aside,footer,[role=banner],[role=navigation],[role=complementary],[role=contentinfo]';
-const extensionUi = '[data-alignread-host],[data-alignread-selection]';
+const extensionUi = '[data-alignread-host],[data-alignread-selection],[data-alignread-paragraph]';
 const ignored = 'script,style,noscript,template,iframe,canvas,svg,form,input,textarea,select,option';
 const attributes = [
   'aria-current', 'aria-hidden', 'aria-selected', 'aria-orientation', 'class', 'contenteditable', 'data-state',

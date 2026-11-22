@@ -2,6 +2,7 @@ import { browser } from 'wxt/browser';
 import { errors, failure, type Result } from '../shared/reader-messages';
 import { MAX_SELECTION_LENGTH, type SelectionRequest, type SelectionSession } from '../shared/selection-messages';
 import { createPanel } from './panel';
+import { startParagraphs } from './paragraphs';
 import { readSelection, sameSelection, type SelectedText } from './source';
 
 function send<T>(message: SelectionRequest): Promise<Result<T>> {
@@ -146,6 +147,9 @@ export function startSelection(session: SelectionSession, onStop: () => void) {
   window.addEventListener('resize', scheduleRefresh, { signal });
   window.addEventListener('hashchange', stop, { signal });
   window.addEventListener('popstate', () => { currentPage(); }, { signal });
+  const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+  navigation?.addEventListener('currententrychange', currentPage, { signal });
+  startParagraphs(session, signal, currentPage, send);
   refresh();
   return { id: session.id, stop };
 }

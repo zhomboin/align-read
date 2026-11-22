@@ -11,7 +11,7 @@
 | 原译对齐 | F-04、F-05 | 段落级双向悬停高亮、直接点击定位和按锚点联动。译文支持 Enter 定位，同步默认开启 |
 | 翻译执行 | F-06 | 支持 Google Cloud Translation Basic、有道智云、自定义 AI 和[官方 AI 服务](translation-services.md)。分批翻译、增量展示、失败可重试，多个标签页独立运行 |
 | 恢复与边界 | F-07、F-08 | 关闭和失效时清理扩展的页面改动；受限页面和布局冲突给出原因；外发前确认，排除敏感输入 |
-| 选词翻译 | F-09 | 独立按标签页启停。按需翻译选中的可见文字，卡片支持复制、重试和关闭 |
+| 选词与段落翻译 | F-09、F-10 | 共用当前标签页开关。「译」打开选词卡片，单按 Ctrl 按段插入译文 |
 | 原位翻译 | F-11 | 在原网页写入译文，保留原有标签、链接、样式和交互。弹窗可恢复原文 |
 | 单页应用 | F-13 | 原页内容变动时更新译文。站内换页后清除旧译文，等待新正文并继续翻译 |
 
@@ -107,13 +107,13 @@ Worker 按需注入网页翻译或选词脚本。状态查询没有回复或发�
 | `reader:clear-cache` | Worker → Reader | 在设置页清空或关闭缓存时，通知活跃 Reader。 |
 | `selection-start`、`selection-stop` | Popup → Worker | 校验服务和当前文档，独立管理选词会话。 |
 | `selection:start`、`selection:state`、`selection:stop` | Worker → 选词脚本 | 绑定到当前文档，挂载、查询或清理选词界面。 |
-| `selection:translate`、`selection:cancel`、`selection:closed` | 选词脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
+| `selection:translate`、`selection:paragraph`、对应取消消息及 `selection:closed` | 选词脚本 → Worker | 验证会话、文档、页面地址和请求编号，复用 Provider 调度执行单项请求。 |
 
 每次开启或成功切换模式都会生成独立会话 ID。Worker 维护标签页、文档及开启地址的授权，Reader 维护翻译项和文字映射。Worker 在请求前后比对批次路由与浏览器提供的当前地址。刷新、跨文档导航、`pagehide` 或关闭会令旧会话失效。切换翻译服务后需重新开启。切换标签页只改变 Popup 的操作目标，各文档的翻译独立进行。
 
 Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、`error`。无活动会话时显示原文。暂停停止派发后续批次，在途批次可完成。关闭立即阻止迟到结果应用，Worker 中断或请求失败的批次可重试。
 
-选词脚本读取选区显示的文字，过滤不可见或受限选区。用户触发后，最多发送 1000 字符，选区或页面变化时丢弃旧响应。保存原选区供定位，卡片在双栏之上显示。界面和会话各自清理，选词译文仅保留在当前卡片内存。
+选词脚本读取选区显示的文字，过滤不可见或受限选区。点击「译」最多发送 1000 字符，卡片随选区变化清理。单按 Ctrl 时，脚本按块或显式换行识别选区触及的各段，发送每一段完整可见正文。段落请求独立排队，长段分片后合并回同一位置。响应按原段校验，原文更新或移除时清理，切换选区可继续阅读已有段落译文。
 
 ## 5. Provider、缓存与权限
 
@@ -134,7 +134,7 @@ Reader 状态为 `preparing`、`translating`、`paused`、`partial`、`ready`、
 | M2 真实翻译 | Provider 接入、外发确认、调度、缓存、错误反馈和多标签隔离 | 验证部分失败、关闭/导航、多标签、授权与敏感输入（AC-08 至 AC-15）；模拟 Worker 中断并核对批次状态 |
 | M3 稳定与发布 | 实测普通博客、技术文档及 README，验证长页性能和分发权限 | 通过 AC-01 至 AC-16；记录 100、500、1000 段表现和点击到初次反馈的时间，确认最低 Chrome 版本及站点适配范围 |
 
-选词翻译按 AC-P1-01 验收，原位翻译按 AC-P1-03 验收，SPA 动态更新按 AC-P1-05 验收。GitHub Actions 执行 Chromium、Worker 和 ZIP 全量回归。最低支持版本在 Manifest 中声明为 Chrome 116。 [回归与验收](test-plan.md)
+选词卡片和段落双语分别按 AC-P1-01、AC-P1-02 验收，原位翻译按 AC-P1-03 验收，SPA 动态更新按 AC-P1-05 验收。GitHub Actions 执行 Chromium、Worker 和 ZIP 全量回归。最低支持版本在 Manifest 中声明为 Chrome 116。 [回归与验收](test-plan.md)
 
 ## 参考资料
 

@@ -85,6 +85,7 @@ async function clearGrant(tabId: number, kind: SessionKind, sessionId?: string) 
   if (!grant || (sessionId && sessionId !== grant.session.id)) return;
   const key = grantKey(tabId, kind);
   cancelSessionJob(key, grant.session.id);
+  if (kind === 'selection') cancelSessionJob(key + ':paragraph', grant.session.id);
   await browser.storage.session.remove(key);
 }
 
@@ -479,20 +480,23 @@ async function selection(tabId: number, documentId: string, url: string | undefi
     await onTab(tabId, () => clearGrant(tabId, 'selection', message.sessionId));
     return success(null);
   }
-  if (message.type === 'selection:cancel') {
-    const job = jobs.get(grantKey(tabId, 'selection'));
+  const paragraph = message.type === 'selection:paragraph' || message.type === 'selection:cancel-paragraph';
+  const key = grantKey(tabId, 'selection') + (paragraph ? ':paragraph' : '');
+  if (message.type === 'selection:cancel' || message.type === 'selection:cancel-paragraph') {
+    const job = jobs.get(key);
     if (job?.sessionId === grant.session.id && job.batchId === message.requestId) job.controller.abort();
     return success(null);
   }
-  if (message.type !== 'selection:translate' || !url || url !== grant.pageUrl) return failure('stale');
+  if ((message.type !== 'selection:translate' && message.type !== 'selection:paragraph') ||
+    !url || url !== grant.pageUrl) return failure('stale');
   if (typeof message.requestId !== 'string' || typeof message.text !== 'string' ||
-      message.text.length > MAX_SELECTION_LENGTH) return failure('invalid-response');
+    message.text.length > (paragraph ? LIMITS.batchChars : MAX_SELECTION_LENGTH)) return failure('invalid-response');
   const batch: Batch = {
     type: 'batch', sessionId: message.sessionId, batchId: message.requestId,
     items: [{ id: message.requestId, text: message.text.trim() }],
   };
   if (!validItems(batch.items)) return failure('invalid-response');
-  const result = await queueBatch(tabId, 'selection', grant, batch);
+  const result = await queueBatch(tabId, 'selection', grant, batch, key);
   if (!result.ok) return result;
   const item = result.value.items[0];
   if (result.value.id !== message.requestId || item?.id !== message.requestId || !item.text.trim()) {
@@ -501,8 +505,7 @@ async function selection(tabId: number, documentId: string, url: string | undefi
   return success(item.text);
 }
 
-async function queueBatch(tabId: number, kind: SessionKind, grant: Grant, message: Batch) {
-  const key = grantKey(tabId, kind);
+async function queueBatch(tabId: number, kind: SessionKind, grant: Grant, message: Batch, key = grantKey(tabId, kind)) {
   const current = jobs.get(key);
   if (current && current.sessionId !== grant.session.id) return failure('stale');
   if (current && kind === 'reader') return failure('rate-limit');

@@ -187,7 +187,7 @@ function Popup() {
       </button>
     </div>
     {page && !page.error && !setup && !page.selectionEnabled && <p className="selection-consent" id="selection-consent">
-      点击「译」后，选中文字会发送给当前翻译服务。
+        点击「译」发送选中文字。单按 Ctrl 发送选区涉及的各段正文，译文显示在各段下方。
     </p>}
     </>}
   </main>;

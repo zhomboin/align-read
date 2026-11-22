@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { checkParagraphPage } = require('./paragraph-check.cjs');
 
 async function checkSelectionWorker({dispatch, request, saveYoudao, session, tabs, grants, calls, youdaoOrigin, until}) {
   const tabId = 17;
@@ -81,6 +82,18 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   assert.equal(sent.credentials, 'omit');
   assert.equal(sent.referrerPolicy, 'no-referrer');
   assert(!JSON.stringify(session).includes('Selected words only'));
+
+  const paragraph = (text, requestId = 'para') => send('selection:paragraph', { sessionId, requestId, text });
+  assert.equal((await paragraph('a'.repeat(1200))).value, 'Mock: ' + 'a'.repeat(1200));
+  assert.deepEqual(await paragraph('a'.repeat(4501)), { ok: false, error: 'invalid-response' });
+  assert.deepEqual(await send('selection:paragraph', { ...item }, { ...sender(), documentId: 'wrong' }), { ok: false, error: 'stale' });
+  const beforeParagraph = calls.length;
+  const slowParagraph = paragraph('Pending before navigation');
+  await until(() => calls.length > beforeParagraph);
+  assert.equal((await translate()).ok, true);
+  assert.equal(calls[beforeParagraph].options.signal.aborted, false);
+  assert((await send('selection:cancel-paragraph', { sessionId, requestId: 'para' })).ok);
+  assert.deepEqual(await slowParagraph, { ok: false, error: 'stale' });
 
   const callsBefore = calls.length;
   const pending = translate({requestId: 'pending', text: 'Pending before navigation'});
@@ -222,6 +235,8 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   assert((await content('status')).includes('选区过长'));
   assert.equal((await requests()).length, beforeExcluded);
 
+  await checkParagraphPage({ page, evaluate, until, pick, command, enable });
+
   await page('Emulation.setDeviceMetricsOverride', {width: 1280, height: 800, deviceScaleFactor: 1, mobile: false});
   const reader = await evaluate(`readerCommand({type:'reader:start',session:{id:'dual',source:'en',target:'zh-CN',range:'main',
     ratio:0.5,syncScroll:true,highlight:true,cache:true}})`);
@@ -253,9 +268,13 @@ async function checkSelectionPage({page, evaluate, until, build, initReader}) {
   await until(() => visible('trigger'));
   await evaluate('readerCommand({type:"reader:stop"})');
   assert.equal(await command('selection:state'), 'first');
+  await pick('source', 2, 8);
+  await key('Control', 17);
+  await until(() => evaluate('!!document.querySelector("[data-alignread-paragraph]")'));
   await evaluate('location.hash = "next"');
   await until(async () => (await command('selection:state')) === null);
   assert.equal(await evaluate('!!document.querySelector("[data-alignread-selection]")'), false);
+  assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), false);
   console.log('Selection UI passed AC-P1-01, preserved selections, retry/copy/close, excluded content, stale responses, and dual-pane coexistence.');
 }
 
@@ -324,9 +343,11 @@ async function checkSelectionPopup({page, evaluate, until, request, saveYoudao, 
 function initSelection() {
   const attach = Element.prototype.attachShadow;
   window.selectionShadow = null;
+  window.paragraphShadows = new WeakMap();
   Element.prototype.attachShadow = function (options) {
     const root = attach.call(this, options);
     if (this.hasAttribute('data-alignread-selection')) window.selectionShadow = root;
+    if (this.hasAttribute('data-alignread-paragraph')) paragraphShadows.set(this, root);
     return root;
   };
   window.pick = (id, start, end) => {
@@ -355,7 +376,7 @@ function initSelection() {
     async sendMessage(message) {
       if (!message.type.startsWith('selection:')) return previous.sendMessage(message);
       selectionMessages.push(message);
-      if (message.type !== 'selection:translate') return {ok: true};
+      if (!['selection:translate', 'selection:paragraph'].includes(message.type)) return { ok: true };
       if (selectionMode === 'slow') return new Promise(resolve => { window.finishSelection = resolve; });
       if (selectionMode === 'error') return {ok: false, error: 'network'};
       return {ok: true, value: '译 ' + message.text};

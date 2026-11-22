@@ -9,6 +9,6 @@ export type SelectionCommand =
   | { type: 'selection:start'; session: SelectionSession };
 
 export type SelectionRequest =
-  | { type: 'selection:translate'; sessionId: string; requestId: string; text: string }
-  | { type: 'selection:cancel'; sessionId: string; requestId: string }
+  | { type: 'selection:translate' | 'selection:paragraph'; sessionId: string; requestId: string; text: string }
+  | { type: 'selection:cancel' | 'selection:cancel-paragraph'; sessionId: string; requestId: string }
   | { type: 'selection:closed'; sessionId: string };
