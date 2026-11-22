@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { DEFAULT_PARAGRAPH_SHORTCUT, isParagraphShortcut } from '../src/shared/paragraph-shortcut';
 import {
   getSettings, hasProviderPermission, isConfigured, isDisabled, normalize, parseYoudaoCredentials, providerConsent,
   providerOrigin, publicSettings, removeUnusedProviderPermissions, sameCredentials, updateSettings, type Settings,
@@ -38,7 +39,7 @@ export default defineBackground(() => {
         ? popup(command) : onTab(command.tabId, () => popup(command));
     } else if (sender.url?.split('#')[0] === browser.runtime.getURL('/pdf.html') && message.type === 'settings') {
       response = options({ type: 'settings' });
-    } else if (sender.url === browser.runtime.getURL('/options.html')) {
+    } else if (sender.url?.split('#')[0] === browser.runtime.getURL('/options.html')) {
       response = options(message as unknown as OptionsMessage);
     } else if (sender.tab?.id !== undefined && sender.frameId === 0 && sender.documentId) {
       response = typeof message.type === 'string' && message.type.startsWith('selection:')
@@ -147,6 +148,26 @@ async function options(message: OptionsMessage) {
   switch (message.type) {
     case 'settings':
       return success(await publicSettings(await getSettings()));
+    case 'save-shortcut': {
+      if (!isParagraphShortcut(message.shortcut)) return failure('unavailable');
+      await updateSettings(current => ({ ...current, paragraphShortcut: message.shortcut }));
+      const grants = await browser.storage.session.get(null);
+      const tabs = new Set(tabCommands.keys());
+      for (const key of Object.keys(grants)) {
+        const match = /^selection:(\d+)$/.exec(key);
+        if (match) tabs.add(Number(match[1]));
+      }
+      await Promise.all([...tabs].map(tabId => onTab(tabId, async () => {
+        const grant = await getGrant(tabId, 'selection');
+        if (!grant) return;
+        const { paragraphShortcut } = await getSettings();
+        await send(tabId, grant.documentId, {
+          type: 'selection:shortcut', sessionId: grant.session.id,
+          shortcut: paragraphShortcut
+        }).catch(() => undefined);
+      })));
+      return success((await getSettings()).paragraphShortcut);
+    }
     case 'save': {
       if (!isReadingOptions(message.preferences)) return failure('unavailable');
       const { cache, disabledSites, authorized: _authorized, ...reading } = normalize(message.preferences);
@@ -228,7 +249,8 @@ async function options(message: OptionsMessage) {
       const settings = await updateSettings((current) => {
         origins = PROVIDER_IDS.map((provider) => providerOrigin(current, provider));
         return {
-          ...defaults, provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
+          ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT,
+          provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
           aiServices: { ...EMPTY_AI_SERVICES }, checks: {},
         };
       });
@@ -377,7 +399,9 @@ async function popup(message: PopupMessage) {
       provider: settings.provider, pageUrl: tab.url } satisfies Grant,
   });
   try {
-    const result = await send(tabId, documentId, { type: `${kind}:start`, session });
+    const result = await send(tabId, documentId, kind === 'selection'
+      ? { type: 'selection:start', session: { ...session, shortcut: current.paragraphShortcut } }
+      : { type: 'reader:start', session });
     if (!result?.ok) await clearGrant(tabId, kind, session.id);
     return result;
   } catch {

@@ -144,7 +144,35 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   await pick('line1');
   await tap();
   assert.equal(await evaluate('!!document.querySelector("[data-alignread-paragraph]")'), false);
-  await evaluate('document.querySelector("#dialogue").remove(); selectionMode = "success"');
+  await evaluate('selectionMode = "success"');
+  await enable('first');
+  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"Alt+K"})');
+  await pick('line3');
+  const beforeRebind = await count();
+  await tap();
+  const k = async modifiers => {
+    await event('keyDown', 'k', 'KeyK', 75, modifiers);
+    await event('keyUp', 'k', 'KeyK', 75, modifiers);
+  };
+  await k(0);
+  await k(1 | 8);
+  assert.equal(await count(), beforeRebind);
+  await event('keyDown', 'Alt', 'AltLeft', 18, 1);
+  await k(1);
+  await event('keyUp', 'Alt', 'AltLeft', 18);
+  assert.deepEqual(await evaluate('paragraphReplies()'), [replies[2]]);
+  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"F8"})');
+  await event('keyDown', 'F8', 'F8', 119);
+  await event('keyUp', 'F8', 'F8', 119);
+  assert.deepEqual(await evaluate('paragraphReplies()'), []);
+  assert.equal(await count(), beforeRebind + 1);
+  await evaluate('selectionCommand({type:"selection:shortcut",sessionId:"first",shortcut:"Ctrl+Shift"})');
+  await down();
+  await event('keyDown', 'Shift', 'ShiftLeft', 16, 10);
+  await event('keyUp', 'Shift', 'ShiftLeft', 16, 2);
+  await up();
+  assert.deepEqual(await evaluate('paragraphReplies()'), [replies[2]]);
+  await evaluate('document.querySelector("#dialogue").remove()');
   await enable('first');
   console.log('Paragraph translation passed partial and cross-paragraph selections, inline breaks, shortcuts, chunking, retry and cleanup.');
 }

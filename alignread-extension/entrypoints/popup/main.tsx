@@ -187,8 +187,11 @@ function Popup() {
       </button>
     </div>
     {page && !page.error && !setup && !page.selectionEnabled && <p className="selection-consent" id="selection-consent">
-        点击「译」发送选中文字。单按 Ctrl 发送选区涉及的各段正文，译文显示在各段下方。
+        点击「译」发送选中文字。按段落快捷键发送选区涉及的各段正文，译文显示在各段下方。
     </p>}
+      {page && <a className="shortcut-settings" href="options.html#shortcuts" target="_blank" rel="noopener noreferrer">
+        段落快捷键 · {page.settings.paragraphShortcut}
+      </a>}
     </>}
   </main>;
 }

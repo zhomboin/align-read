@@ -93,7 +93,13 @@ function startWorker() {
         if (!tab.scripts.includes(`/${kind}.js`)) return undefined;
         if (kind === 'selection') {
           if (message.type === 'selection:state') return tab.selectionId ?? null;
+          if (message.type === 'selection:shortcut') {
+            assert.equal(message.sessionId, tab.selectionId);
+            tab.shortcut = message.shortcut;
+            return null;
+          }
           if (message.type === 'selection:start') {
+            tab.shortcut = message.session.shortcut;
             tab.selectionId = message.session.id;
             return {ok: true, value: null};
           }

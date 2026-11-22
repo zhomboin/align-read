@@ -38,6 +38,7 @@ export type ProviderStatus = {
   appKeySuffix?: string;
 };
 export type PublicSettings = Omit<Preferences, 'authorized'> & {
+  paragraphShortcut: string;
   provider: ProviderId;
   providers: Record<ProviderId, ProviderStatus>;
   aiServices: Record<AiProviderId, AiSettings | null>;
@@ -124,6 +125,7 @@ export type PopupMessage =
   | { type: 'control'; tabId: number; command: ReaderControl };
 export type OptionsMessage =
   | { type: 'settings' }
+  | { type: 'save-shortcut'; shortcut: string }
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
   | { type: 'save-youdao'; credentials?: YoudaoCredentials | null; authorized: boolean }

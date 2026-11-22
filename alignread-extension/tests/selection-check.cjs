@@ -59,6 +59,16 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
   assert((await popup('start', options)).ok);
   assert.equal(calls.length, initialCalls);
   const sessionId = session[`selection:${tabId}`].session.id;
+  assert.equal(tab.shortcut, 'Ctrl');
+  const saveShortcut = shortcut => dispatch({ type: 'save-shortcut', shortcut },
+    { url: 'chrome-extension://alignread-test/options.html#shortcuts' });
+  assert.deepEqual(await saveShortcut('Alt+K'), { ok: true, value: 'Alt+K' });
+  assert.equal(tab.shortcut, 'Alt+K');
+  assert.equal(tab.selectionId, sessionId);
+  assert.equal((await pageState()).settings.paragraphShortcut, 'Alt+K');
+  assert.equal((await saveShortcut('Ctrl+Ctrl+K')).ok, false);
+  assert.equal((await saveShortcut('Ctrl+Unidentified')).ok, false);
+  assert.equal((await pageState()).settings.paragraphShortcut, 'Alt+K');
   const item = {sessionId, requestId: 'selected-item', text: '  Selected words only  '};
   const translate = (changes, from) => send('selection:translate', {...item, ...changes}, from);
   for (const from of [
@@ -108,6 +118,7 @@ async function checkSelectionWorker({dispatch, request, saveYoudao, session, tab
 
   assert((await start()).ok);
   const preference = (await request({type: 'settings'})).value;
+  assert.equal(tab.shortcut, 'Alt+K');
   const saveDisabled = (disabledSites) => request({type: 'save', preferences: {...preference, disabledSites}});
   assert((await saveDisabled(['selection.example.test'])).ok);
   assert.deepEqual(await start(), {ok: false, error: 'site-disabled'});

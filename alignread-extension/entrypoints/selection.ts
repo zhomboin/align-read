@@ -25,6 +25,10 @@ export default defineUnlistedScript(() => {
         stop();
         reply(null);
         break;
+      case 'selection:shortcut':
+        if (active?.id === command.sessionId) active.setShortcut(command.shortcut);
+        reply(null);
+        break;
       case 'selection:start':
         stop();
         active = startSelection(command.session, () => { active = undefined; });

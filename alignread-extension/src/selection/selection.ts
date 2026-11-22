@@ -150,9 +150,9 @@ export function startSelection(session: SelectionSession, onStop: () => void) {
   window.addEventListener('popstate', () => { currentPage(); }, { signal });
   const navigation = (window as Window & { navigation?: EventTarget }).navigation;
   navigation?.addEventListener('currententrychange', currentPage, { signal });
-  startParagraphs(session, signal, currentPage, send);
+  const setShortcut = startParagraphs(session, signal, currentPage, send);
   refresh();
-  return { id: session.id, stop };
+  return { id: session.id, stop, setShortcut };
 }
 
 function copyText(text: string) {

@@ -1,7 +1,7 @@
 import type { Result } from '../shared/reader-messages';
 import type { SelectionRequest, SelectionSession } from '../shared/selection-messages';
 import { splitText } from '../shared/split-text';
-import { onControlTap } from './control-key';
+import { DEFAULT_PARAGRAPH_SHORTCUT, listenForShortcut } from '../shared/paragraph-shortcut';
 import { createParagraphFeedback } from './paragraph-feedback';
 import { matchesParagraph, selectedParagraphs, type Paragraph } from './paragraph-source';
 
@@ -72,8 +72,9 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     enqueue(entry);
   }
 
-  onControlTap(() => {
-    if (!currentPage()) return;
+  let shortcut = session.shortcut ?? DEFAULT_PARAGRAPH_SHORTCUT;
+  const resetKeys = listenForShortcut(pressed => {
+    if (pressed !== shortcut || !currentPage()) return false;
     const sources = selectedParagraphs();
     const allShown = sources.length > 0 && sources.every(source => {
       const entry = entries.get(source.first);
@@ -85,6 +86,7 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
         if (allShown) remove(entry);
       } else insert(source);
     }
+    return sources.length > 0;
   }, signal);
 
   const observer = new MutationObserver(records => {
@@ -107,4 +109,8 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     observer.disconnect();
     for (const entry of entries.values()) remove(entry);
   }, { once: true });
+  return (next: string) => {
+    shortcut = next;
+    resetKeys();
+  };
 }
