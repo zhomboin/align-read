@@ -8,7 +8,9 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
       '<div id="line2">Second speaker <span hidden>private</span>answers.</div>' +
       '<p id="line3"><a href="#third">Third speaker</a> agrees.</p>' +
       '<p id="breaks">Hello!<br>How are you?<br>Very well.</p>' +
-      '<p id="longLine"></p><pre id="codeLine">Private code</pre>';
+      '<p id="longLine"></p><pre id="codeLine">Private code</pre>' +
+      '<p id="codeOnly"><code>SELECT 1</code></p>' +
+      '<p id="sqlProse">Use <code id="term">SELECT</code> to read <code>items</code>.</p>';
     document.querySelector('article').append(fixture);
     document.querySelector('#longLine').textContent = 'long paragraph '.repeat(240).trim();
     window.selectDialogue = () => getSelection().setBaseAndExtent(
@@ -111,11 +113,16 @@ async function checkParagraphPage({ page, evaluate, until, pick, command, enable
   assert.equal((await evaluate('paragraphReplies()')).at(-1), chunks.map(chunk => '译 ' + chunk).join(''));
 
   const beforePrivate = await count();
-  for (const id of ['editable', 'editor', 'codeLine']) {
+  for (const id of ['editable', 'editor', 'codeLine', 'codeOnly']) {
     await pick(id);
     await tap();
   }
   assert.equal(await count(), beforePrivate);
+  await pick('term');
+  await tap();
+  assert.equal((await evaluate('paragraphCalls()')).at(-1), 'Use SELECT to read items.');
+  assert(await evaluate('document.querySelector("#sqlProse").nextSibling.hasAttribute("data-alignread-paragraph")'));
+  await tap();
   await evaluate('selectionMode = "error"');
   await pick('line2', 0, 4);
   await tap();

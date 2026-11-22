@@ -1,6 +1,7 @@
 import { readableText, selectedTextNodes, selectionRange } from './source';
 
-const excluded = 'pre,code,kbd,samp,[role=code],[role=button],[translate=no i],.notranslate,[data-alignread-selection]';
+const excluded = 'pre,[role=button],[translate=no i],.notranslate,[data-alignread-selection]';
+const inlineCode = 'code,kbd,samp,[role=code]';
 const protectedHost = 'a,button,label,summary,[role=button],[contenteditable]:not([contenteditable=false])';
 const paragraphTags = 'p,li,blockquote,dt,dd,td,th,figcaption,h1,h2,h3,h4,h5,h6,[role=paragraph]';
 
@@ -44,21 +45,26 @@ function paragraphsIn(owner: HTMLElement, readable: ReturnType<typeof readableTe
   let first: Text | undefined;
   let parts: string[] = [];
   let selected = false;
+  let hasProse = false;
 
   function finish(boundary?: Element) {
-    if (first && (selected || !touched)) {
+    if (first && hasProse && (selected || !touched)) {
       const position = placement(owner, boundary);
       if (position) result.push({ owner, first, text: parts.join('').replace(/\s+/gu, ' ').trim(), ...position });
     }
     first = undefined;
     parts = [];
     selected = false;
+    hasProse = false;
   }
 
   function visit(node: Node) {
     if (node instanceof Text) {
       if (!readable(node)) return;
-      if (node.data.trim()) first ??= node;
+      if (node.data.trim()) {
+        first ??= node;
+        if (!hasProse) hasProse = !node.parentElement?.closest(inlineCode);
+      }
       parts.push(node.data);
       if (touched?.has(node)) selected = true;
     } else if (node instanceof HTMLElement && !node.hasAttribute('data-alignread-paragraph') &&
