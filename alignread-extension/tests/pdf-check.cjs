@@ -188,6 +188,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     const base = 'http://127.0.0.1:' + server.address().port;
+    await page('Emulation.setDeviceMetricsOverride', { width: 1024, height: 700, deviceScaleFactor: 1, mobile: false });
     await page('Page.addScriptToEvaluateOnNewDocument', { source: '(' + mockViewer + ')(' + JSON.stringify(base) + ')' });
     const navigate = suffix => page('Page.navigate', { url: base + suffix });
     const hasStatus = async message => {
@@ -209,12 +210,21 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
         const viewer = document.querySelector('#viewer');
         const target = document.querySelector('.pdf-sheet[data-page="${number}"]');
         const rect = viewer.getBoundingClientRect();
+        const targetTop = Math.max(0, Math.min(viewer.scrollHeight - viewer.clientHeight,
+          target.offsetTop - viewer.clientHeight * ${lead}));
+        const deltaY = Math.round(targetTop - viewer.scrollTop);
+        if (deltaY === 0) return null;
+        window.pdfWheelSettled = false;
+        viewer.addEventListener('scrollend', () => { window.pdfWheelSettled = true; }, { once: true });
         return {
           x: rect.left + rect.width / 2, y: rect.top + rect.height / 2,
-          deltaY: target.offsetTop - viewer.scrollTop - viewer.clientHeight * ${lead}
+          deltaY
         };
       })()`);
-      await page('Input.dispatchMouseEvent', { type: 'mouseWheel', ...location, deltaX: 0 });
+      if (location) {
+        await page('Input.dispatchMouseEvent', { type: 'mouseWheel', ...location, deltaX: 0 });
+        await until(() => evaluate('window.pdfWheelSettled'));
+      }
     };
     for (const suffix of ['', '?pending=1']) {
       await navigate('/popup.html' + suffix);
