@@ -10,7 +10,15 @@ export default defineConfig({
     async 'build:publicAssets'(_wxt, files) {
       const resolve = createRequire(import.meta.url).resolve;
       const root = dirname(resolve('pdfjs-dist/package.json'));
+      const exportDependency = createRequire(resolve('pdf-lib/package.json')).resolve;
+      files.push({ absoluteSrc: join(dirname(exportDependency('tslib')), 'LICENSE.txt'), relativeDest: 'licenses/pdf-lib-tslib.txt' });
       files.push({ absoluteSrc: resolve('prismjs/LICENSE'), relativeDest: 'licenses/prismjs.txt' });
+      for (const [library, license] of [
+        ['pdf-lib', 'LICENSE.md'], ['@pdf-lib/standard-fonts', 'LICENSE.md'],
+        ['@pdf-lib/upng', 'LICENSE'], ['pako', 'LICENSE'],
+      ] as const) {
+        files.push({ absoluteSrc: resolve(library + '/' + license), relativeDest: 'licenses/' + library + '.txt' });
+      }
       const copy = (source: string, dest = source) => files.push({ absoluteSrc: join(root, source), relativeDest: 'pdfjs/' + dest });
       copy('legacy/build/pdf.worker.min.mjs', 'pdf.worker.mjs');
       copy('LICENSE');
@@ -24,7 +32,7 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
     name: 'AlignRead',
-    description: '双栏网页翻译与原译对照阅读',
+    description: '论文 PDF 与网页对照翻译，保留公式、图表和阅读结构。',
     icons: {
       16: 'icons/16.png',
       32: 'icons/32.png',

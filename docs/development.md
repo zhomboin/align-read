@@ -56,6 +56,14 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 ## 提交与回归
 
+验证 PDF 原位阅读和下载时，在 WSL 扩展目录执行下列命令。测试使用合成 PDF 和模拟翻译服务，实际构建产物会生成译本并重新读取正文与附录。
+
+```bash
+npm run check
+npm run build
+npm run test:pdf
+```
+
 从最新的 `main` 创建开发分支。修改设置界面时，在扩展目录执行下面的定向检查。若浏览器不在 PATH，按 [测试计划](test-plan.md#运行) 设置 `CHROMIUM_BIN`。
 
 ```bash

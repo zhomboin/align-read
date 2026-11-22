@@ -21,6 +21,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "6.5.438",
     "prismjs": "1.30.0",
     "react": "^19.2.4",
