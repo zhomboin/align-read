@@ -16,6 +16,7 @@ async function checkPdfRange({ navigate, evaluate, until, hasStatus }) {
 
   await evaluate('window.pdfHold = "Document paragraph 11"; window.setPdfLookAhead(4)');
   await hasStatus('正在预译第 11 页');
+  await until(() => evaluate('pdfBatches.flat().at(-1)?.text === "Document paragraph 11"'));
   await evaluate('window.setPdfLookAhead(0)');
   await waitIdle();
   assert.deepEqual(await sent(), [8, 9, 10, 11]);
