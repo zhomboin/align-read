@@ -1,13 +1,14 @@
-import { errors, type ProviderId, type ReadingOptions } from '../shared/reader-messages';
+import { DEFAULT_PDF_LOOK_AHEAD, errors, type PdfLookAhead, type ProviderId, type ReadingOptions } from '../shared/reader-messages';
 import type { PdfTranslationItem } from './math-placeholders';
 import { translatePage } from './translate';
 
-export const pdfLookAhead = 2;
 type Progress = { values: Map<string, string>; complete: boolean };
 export type PdfTranslationConfig = { provider: ProviderId; options: ReadingOptions; hostname: string };
 
 export class PdfTranslationQueue {
   private page = 1;
+  private offset = 0;
+  private completed = 0;
   private config?: PdfTranslationConfig;
   private job?: { page: number; cancel: AbortController };
   private pages = new Map<number, Progress>();
@@ -16,9 +17,21 @@ export class PdfTranslationQueue {
   failedPage?: number;
 
   constructor(private total: number, private read: (page: number) => Promise<PdfTranslationItem[]>,
-    private update: () => void) { }
+    private update: () => void, private lookAhead: PdfLookAhead = DEFAULT_PDF_LOOK_AHEAD) { }
 
   get translatingPage() { return this.job?.page; }
+  get completedPages() { return this.completed; }
+
+  // 跳页或调整范围时从当前页重新排队；按原顺序推进时只访问后面的页。
+  nextPendingPage() {
+    if (this.completed === this.total) return;
+    const length = this.lookAhead === 'all' ? this.total : Math.min(this.total - this.page + 1, this.lookAhead + 1);
+    while (this.offset < length) {
+      const page = (this.page - 1 + this.offset) % this.total + 1;
+      if (!this.result(page)?.complete) return page;
+      this.offset++;
+    }
+  }
 
   result(page: number) { return this.pages.get(page); }
 
@@ -31,12 +44,20 @@ export class PdfTranslationQueue {
   }
 
   select(page: number) {
+    if (page !== this.page) this.offset = 0;
     this.page = page;
     // Keep the running request when the reader opens that page or already has its translation.
     const running = this.job;
-    if (running && (running.page < page || running.page > page + pdfLookAhead ||
-      (running.page !== page && !this.result(page)?.complete))) this.cancelJob();
+    if (running && running.page !== page && (!this.result(page)?.complete ||
+      (this.lookAhead !== 'all' && (running.page < page || running.page - page > this.lookAhead)))) this.cancelJob();
     this.advance();
+  }
+
+  setLookAhead(value: PdfLookAhead) {
+    if (this.lookAhead === value) return;
+    this.lookAhead = value;
+    this.offset = 0;
+    this.select(this.page);
   }
 
   stop() {
@@ -49,6 +70,8 @@ export class PdfTranslationQueue {
     this.error = undefined;
     this.failedPage = undefined;
     this.pages.clear();
+    this.offset = 0;
+    this.completed = 0;
     this.stop();
   }
 
@@ -60,13 +83,12 @@ export class PdfTranslationQueue {
 
   private advance() {
     if (this.enabled && !this.job && this.config) {
-      for (let page = this.page; page <= Math.min(this.page + pdfLookAhead, this.total); page++) {
-        if (this.result(page)?.complete) continue;
+      const page = this.nextPendingPage();
+      if (page !== undefined) {
         const job = { page, cancel: new AbortController() };
         this.job = job;
         void this.run(job, this.config);
-        break;
-      }
+      } else if (this.lookAhead === 'all') this.enabled = false;
     }
     this.update();
   }
@@ -91,6 +113,7 @@ export class PdfTranslationQueue {
     }
     signal.throwIfAborted();
     progress.complete = true;
+    this.completed++;
     return progress.values;
   }
 

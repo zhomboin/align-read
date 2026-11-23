@@ -12,7 +12,7 @@ import { readReaderPage } from '../src/shared/reader-page';
 import { sameSelectionPage } from '../src/shared/selection-page';
 import {
   LIMITS, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, failure, isProviderId, isReaderMode, isReadingOptions, isRecord,
-  isTabId, selectedProviderAccess, success,
+  DEFAULT_PDF_LOOK_AHEAD, isPdfLookAhead, isTabId, selectedProviderAccess, success,
   type OptionsMessage, type PageState, type PopupMessage, type ProviderCheck, type ProviderId, type ReaderCommand, type ReaderRequest,
   type ReaderState, type Session, type TranslationItem,
 } from '../src/shared/reader-messages';
@@ -148,6 +148,12 @@ async function options(message: OptionsMessage) {
   switch (message.type) {
     case 'settings':
       return success(await publicSettings(await getSettings()));
+    case 'save-pdf-range': {
+      const { pdfLookAhead } = message;
+      if (!isPdfLookAhead(pdfLookAhead)) return failure('unavailable');
+      const saved = await updateSettings(current => ({ ...current, pdfLookAhead }));
+      return success(saved.pdfLookAhead);
+    }
     case 'save-shortcut': {
       if (!isParagraphShortcut(message.shortcut)) return failure('unavailable');
       await updateSettings(current => ({ ...current, paragraphShortcut: message.shortcut }));
@@ -249,7 +255,7 @@ async function options(message: OptionsMessage) {
       const settings = await updateSettings((current) => {
         origins = PROVIDER_IDS.map((provider) => providerOrigin(current, provider));
         return {
-          ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT,
+          ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT, pdfLookAhead: DEFAULT_PDF_LOOK_AHEAD,
           provider: 'google', key: '', revision: crypto.randomUUID(), youdao: null, youdaoAuthorized: false,
           aiServices: { ...EMPTY_AI_SERVICES }, checks: {},
         };

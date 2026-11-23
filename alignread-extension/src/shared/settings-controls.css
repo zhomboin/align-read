@@ -32,7 +32,7 @@ h1, h2, h3, p, fieldset { margin: 0; }
 button, input, select, textarea { font: inherit; color: inherit; }
 fieldset { padding: 0; border: 0; min-inline-size: 0; }
 
-button, select, input[type="text"], input[type="password"], textarea {
+button, select, input[type="text"], input[type="password"], input[type="number"], textarea {
   min-inline-size: 0;
   min-block-size: 42px;
   padding: 9px 12px;
@@ -40,7 +40,7 @@ button, select, input[type="text"], input[type="password"], textarea {
   border-radius: 10px;
 }
 
-select, input[type="text"], input[type="password"], textarea {
+select, input[type="text"], input[type="password"], input[type="number"], textarea {
   inline-size: 100%;
   background: var(--surface-inset);
   box-shadow: var(--inset);

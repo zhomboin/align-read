@@ -6,12 +6,14 @@ import {
 } from '../../shared/ai-settings';
 import {
   MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, clampRatio, defaults, errors, isProviderId, isReadingOptions, isRecord,
-  type ErrorCode, type Preferences, type ProviderCheck, type ProviderId, type PublicSettings, type YoudaoCredentials,
+  DEFAULT_PDF_LOOK_AHEAD, isPdfLookAhead, type PdfLookAhead, type ErrorCode, type Preferences,
+  type ProviderCheck, type ProviderId, type PublicSettings, type YoudaoCredentials,
 } from '../../shared/reader-messages.ts';
 
 const KEY = 'providerSettings';
 type SavedAiService = AiCredentials & { authorized: boolean };
 export type Settings = Preferences & {
+  pdfLookAhead: PdfLookAhead;
   paragraphShortcut: string;
   provider: ProviderId;
   key: string;
@@ -39,6 +41,7 @@ export async function getSettings(): Promise<Settings> {
   const aiServices: Settings['aiServices'] = { ...EMPTY_AI_SERVICES };
   for (const provider of AI_PROVIDER_IDS) aiServices[provider] = readAiService(provider, storedAi[provider]);
   return { ...normalize(saved),
+    pdfLookAhead: isPdfLookAhead(saved.pdfLookAhead) ? saved.pdfLookAhead : DEFAULT_PDF_LOOK_AHEAD,
     paragraphShortcut: isParagraphShortcut(saved.paragraphShortcut) ? saved.paragraphShortcut : DEFAULT_PARAGRAPH_SHORTCUT,
     provider: isProviderId(saved.provider) ? saved.provider : 'google',
     key: typeof saved.key === 'string' ? saved.key : '',

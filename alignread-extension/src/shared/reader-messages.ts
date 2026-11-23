@@ -10,6 +10,11 @@ export const LANGUAGES = {
 export type Language = keyof typeof LANGUAGES;
 export type SourceLanguage = Language | 'auto';
 export type ReadingRange = 'visible' | 'main';
+export type PdfLookAhead = number | 'all';
+export const DEFAULT_PDF_LOOK_AHEAD = 2;
+export function isPdfLookAhead(value: unknown): value is PdfLookAhead {
+  return value === 'all' || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+}
 export type ReaderMode = 'dual' | 'replace';
 export type ReadingOptions = { source: SourceLanguage; target: Language; range: ReadingRange };
 export type Preferences = ReadingOptions & {
@@ -38,6 +43,7 @@ export type ProviderStatus = {
   appKeySuffix?: string;
 };
 export type PublicSettings = Omit<Preferences, 'authorized'> & {
+  pdfLookAhead: PdfLookAhead;
   paragraphShortcut: string;
   provider: ProviderId;
   providers: Record<ProviderId, ProviderStatus>;
@@ -125,6 +131,7 @@ export type PopupMessage =
   | { type: 'control'; tabId: number; command: ReaderControl };
 export type OptionsMessage =
   | { type: 'settings' }
+  | { type: 'save-pdf-range'; pdfLookAhead: PdfLookAhead }
   | { type: 'save-shortcut'; shortcut: string }
   | { type: 'save'; preferences: Omit<Preferences, 'authorized'>; scope?: 'reading' | 'sites' }
   | { type: 'save-google'; key?: string; authorized: boolean }
