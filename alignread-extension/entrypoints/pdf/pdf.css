@@ -28,7 +28,7 @@ button:disabled { opacity: .5; cursor: default; }
 #detail canvas { max-width: 100%; height: auto; }
 #detail .pdf-inline-math { display: inline-block; }
 #detail::backdrop { background: #17241f66; }
-#viewer { min-height: 0; overflow: auto; container-type: size; scrollbar-gutter: stable; }
+#viewer { min-height: 0; overflow: auto; overflow-anchor: none; container-type: size; scrollbar-gutter: stable; }
 #viewer:focus-visible { outline: 2px solid #236749; outline-offset: 2px; }
 #pages { position: relative; display: grid; gap: 12px; }
 .pdf-sheet { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items: start; min-height: min(260px, 60cqh); background: white; border: 1px solid #d5ded8; }

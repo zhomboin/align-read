@@ -6,9 +6,10 @@ import { AI_PROVIDERS, EMPTY_AI_SERVICES, aiHostPermission, isAiProviderId, pars
 import { request } from '../../src/shared/extension';
 import { DEFAULT_PARAGRAPH_SHORTCUT } from '../../src/shared/paragraph-shortcut';
 import { ShortcutSettings } from './shortcut-settings';
+import { PdfRangeSettings } from './pdf-range-settings';
 import { LanguageFields } from '../../src/shared/language-fields';
 import {
-  LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
+  DEFAULT_PDF_LOOK_AHEAD, LIMITS, MAX_YOUDAO_CREDENTIAL_LENGTH, PROVIDER_IDS, TRANSLATION_PROVIDERS, defaults, errors, isProviderId,
   type ProviderId, type ProviderStatus, type PublicSettings, type ReadingOptions, type YoudaoCredentials,
 } from '../../src/shared/reader-messages';
 import { AiProviderForm, type AiDraft } from './ai-provider-form';
@@ -17,8 +18,8 @@ import './options.css';
 
 const emptyYoudaoCredentials: YoudaoCredentials = { appKey: '', appSecret: '' };
 const emptyStatus: ProviderStatus = { configured: false, consent: false, hostPermission: false, lastCheck: null };
-const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', shortcuts: '快捷键', sites: '站点与缓存' } as const;
-const categories = ['translation', 'reading', 'shortcuts', 'sites'] as const;
+const categoryLabels = { translation: '翻译服务', reading: '双栏阅读', pdf: 'PDF 阅读', shortcuts: '快捷键', sites: '站点与缓存' } as const;
+const categories = ['translation', 'reading', 'pdf', 'shortcuts', 'sites'] as const;
 type Category = typeof categories[number];
 type PreferenceCategory = 'reading' | 'sites';
 type ReadingPreferences = ReadingOptions & Pick<PublicSettings, 'ratio' | 'syncScroll' | 'highlight' | 'dualComments' | 'replaceComments'>;
@@ -55,7 +56,7 @@ function Options() {
   const [category, setCategory] = useState(currentCategory);
   const [editor, setEditor] = useState<ProviderId>();
   const [settings, setSettings] = useState<PublicSettings>({
-    ...defaults, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
+    ...defaults, pdfLookAhead: DEFAULT_PDF_LOOK_AHEAD, paragraphShortcut: DEFAULT_PARAGRAPH_SHORTCUT, provider: 'google', aiServices: { ...EMPTY_AI_SERVICES },
     providers: Object.fromEntries(PROVIDER_IDS.map((provider) => [provider, emptyStatus])) as PublicSettings['providers'],
   });
   const [key, setKey] = useState('');
@@ -283,6 +284,8 @@ function Options() {
     <main>
       <h2 className="page-title">{categoryLabels[category]}</h2>
       {loadError && <p className="feedback" role="status">{loadError}</p>}
+      {category === 'pdf' && <PdfRangeSettings value={settings.pdfLookAhead} disabled={busy || Boolean(loadError)}
+        onSaved={pdfLookAhead => setSettings(current => ({ ...current, pdfLookAhead }))} />}
       {category === 'translation' && (
         <section className="panel" aria-label="翻译服务配置">
           <div className="provider-select">

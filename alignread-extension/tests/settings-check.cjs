@@ -20,6 +20,10 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   const currentProvider = (name) => evaluate(`document.querySelector('.provider-current')?.textContent.includes(${JSON.stringify(name)})`);
 
   await request({type: 'reset'});
+  delete local.providerSettings.pdfLookAhead;
+  assert.equal((await request({ type: 'settings' })).value.pdfLookAhead, 2);
+  local.providerSettings.pdfLookAhead = -3;
+  assert.equal((await request({ type: 'settings' })).value.pdfLookAhead, 2);
   await resize(220);
   await page('Page.navigate', {url: 'http://alignread.test/popup.html'});
   await until(() => evaluate('document.querySelector("header button")?.textContent === "设置"'));
@@ -95,6 +99,33 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
 
   await resize(320);
   assert(await noOverflow());
+  await nav('pdf');
+  const editCount = value => evaluate(`fill(document.querySelector('#pdf-look-ahead'), ${JSON.stringify(value)})`);
+  assert.equal(await evaluate('document.querySelector("#pdf-look-ahead").value'), '2');
+  for (const invalid of ['', '-1', '1.5']) {
+    await editCount(invalid);
+    assert.equal(await evaluate('document.querySelector("#pdf-look-ahead").checkValidity()'), false);
+  }
+  await editCount('0');
+  await click('button[type=submit]');
+  await until(() => local.providerSettings.pdfLookAhead === 0);
+  await page('Page.reload');
+  await until(() => evaluate('document.querySelector("#pdf-look-ahead")?.value === "0"'));
+  await editCount('7');
+  await click('button[type=submit]');
+  await until(() => local.providerSettings.pdfLookAhead === 7);
+  await until(() => evaluate('!document.querySelector("#pdf-range").disabled'));
+  await evaluate(`fill(document.querySelector('#pdf-range'), 'all', 'change')`);
+  await click('button[type=submit]');
+  await until(() => local.providerSettings.pdfLookAhead === 'all');
+  await page('Page.reload');
+  await until(() => evaluate('document.querySelector("#pdf-range")?.value === "all"'));
+  assert.equal(await evaluate('document.querySelector("#pdf-look-ahead")'), null);
+  assert(await noOverflow());
+  for (const invalid of [-1, 1.5, '5', null]) {
+    assert.equal((await request({ type: 'save-pdf-range', pdfLookAhead: invalid })).ok, false);
+  }
+  assert.equal((await request({ type: 'settings' })).value.pdfLookAhead, 'all');
   await nav('shortcuts');
   const recordShortcut = '.shortcut-panel button[aria-pressed]';
   const shortcutKey = (key, code, modifiers = 0, type = 'keyDown') =>
@@ -153,6 +184,7 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   assert.equal(local.providerSettings.range, 'main');
   assert.equal(local.providerSettings.ratio, .51);
   assert.equal(local.providerSettings.dualComments, true);
+  assert.equal(local.providerSettings.pdfLookAhead, 'all');
   assert.equal(local.providerSettings.replaceComments, false);
   assert.deepEqual(local.providerSettings.disabledSites, ['example.test']);
   await nav('sites');
@@ -164,6 +196,7 @@ async function checkSettings({page, evaluate, until, manifest, request, local, g
   await evaluate('window.confirm = () => true');
   await click('.reset');
   await until(() => evaluate('document.querySelector("footer [role=status]").textContent.includes("已恢复默认设置")'));
+  assert.equal(local.providerSettings.pdfLookAhead, 2);
   assert.equal(await evaluate('document.querySelector("#disabled-sites").value'), '');
   assert.equal(local.providerSettings.target, 'zh-CN');
   assert.equal(local.providerSettings.range, 'visible');

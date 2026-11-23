@@ -3,12 +3,12 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { openDocument, type PdfInput } from '../../src/pdf/document';
 import { displayPage, readPage, type PageContent } from '../../src/pdf/show-page';
 import { displayInplace } from '../../src/pdf/inplace-view';
-import { PdfTranslationQueue, pdfLookAhead } from '../../src/pdf/translation-queue';
+import { PdfTranslationQueue } from '../../src/pdf/translation-queue';
 import { PdfContinuousView } from '../../src/pdf/continuous-view';
 import { request } from '../../src/shared/extension';
 import { currentPdf, pdfAddress } from '../../src/shared/pdf-source';
 import {
-  LANGUAGES, TRANSLATION_PROVIDERS, errors, isRecord, selectedProviderAccess, type ErrorCode, type Language,
+  DEFAULT_PDF_LOOK_AHEAD, LANGUAGES, TRANSLATION_PROVIDERS, errors, isRecord, selectedProviderAccess, type ErrorCode, type Language,
   type PublicSettings, type SourceLanguage,
 } from '../../src/shared/reader-messages';
 import './pdf.css';
@@ -66,9 +66,10 @@ function controls() {
   next.disabled = !pdf || number >= pdf.numPages;
   input.disabled = !pdf;
   const job = queue?.translatingPage;
-  const canStart = model && (model.items.length > 0 || (pdf && number < pdf.numPages));
+  const lookAhead = settings?.pdfLookAhead ?? DEFAULT_PDF_LOOK_AHEAD;
+  const canStart = model && (model.items.length > 0 || lookAhead === 'all' || (lookAhead > 0 && pdf && number < pdf.numPages));
   translate.disabled = !settings || siteDisabled() || !canStart || Boolean(queue?.enabled) ||
-    Boolean(queue?.result(number)?.complete && !queue.error && !hasPendingPages());
+    Boolean(queue && !queue.error && queue.nextPendingPage() === undefined);
   translate.disabled ||= Boolean(exportJob);
   download.disabled = !pdf || !settings || Boolean(siteDisabled() || exportJob);
   cancel.hidden = !queue?.enabled && !exportJob;
@@ -78,21 +79,13 @@ function controls() {
   const heading = !besideSource && layout.value === 'inplace' ? 'PDF 原位阅读' : 'PDF 对照阅读';
   document.querySelector('h1')!.textContent = heading;
   document.title = heading + ' · AlignRead';
-  translate.textContent = queue?.error ? '重试翻译' : queue?.result(number) ? '继续翻译' : '翻译并预译后两页';
+  const action = lookAhead === 'all' ? '翻译整份 PDF' : lookAhead === 0 ? '翻译当前页' : '翻译并预译后 ' + lookAhead + ' 页';
+  translate.textContent = queue?.error ? '重试翻译' : action;
   if (settings) translate.title = TRANSLATION_PROVIDERS[settings.provider].label;
   if (startOnOpen && settings && canStart && !translate.disabled) {
     startOnOpen = false;
     queueMicrotask(() => translate.click());
   }
-}
-
-function hasPendingPages() {
-  if (!pdf || !queue || !view) return false;
-  const number = view.page;
-  for (let page = number + 1; page <= Math.min(number + pdfLookAhead, pdf.numPages); page++) {
-    if (!queue.result(page)?.complete) return true;
-  }
-  return false;
 }
 
 function updateTranslation(showStatus = true) {
@@ -114,8 +107,10 @@ function updateTranslation(showStatus = true) {
   }
   const error = queue?.error ? '第 ' + queue.failedPage + ' 页：' + queue.error : '';
   const settingsNotice = siteDisabled() ? errors['site-disabled'] : settingsError ? errors[settingsError] : '';
+  const progress = settings?.pdfLookAhead === 'all' && pdf && queue && (queue.enabled || queue.completedPages)
+    ? ' 全文进度 ' + queue.completedPages + '/' + pdf.numPages + ' 页。' : '';
   const message = pageStatus + (job !== undefined && job !== number ? ' 正在预译第 ' + job + ' 页…' : '') +
-    (error ? ' ' + error : '') + (settingsNotice ? ' ' + settingsNotice : '');
+    progress + (error ? ' ' + error : '') + (settingsNotice ? ' ' + settingsNotice : '');
   if (status.textContent !== message) status.textContent = message;
 }
 
@@ -133,6 +128,7 @@ async function readSettings(credentialsChanged = false) {
     if (reset || siteDisabled()) cancelExport();
     if (reset) queue?.reset();
     if (siteDisabled()) queue?.stop();
+    queue?.setLookAhead(next.pdfLookAhead ?? DEFAULT_PDF_LOOK_AHEAD);
   }
   if (hadNotice || settingsError || siteDisabled()) updateTranslation();
   else controls();
@@ -208,7 +204,8 @@ async function load(inputFile: PdfInput, beside = false, startPage = 1, wholeFil
     }, wholeFile || Boolean(inplaceSource && !beside && inputFile instanceof URL));
     if (signal.aborted) return;
     pdf = doc;
-    queue = new PdfTranslationQueue(doc.numPages, async page => (await getModel(doc, page)).content.items, updateTranslation);
+    queue = new PdfTranslationQueue(doc.numPages, async page => (await getModel(doc, page)).content.items,
+      updateTranslation, settings?.pdfLookAhead);
     input.max = String(doc.numPages);
     find('total').textContent = '/ ' + doc.numPages;
     viewport.hidden = false;

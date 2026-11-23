@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const { fixturePdf } = require('./pdf-fixture.cjs');
 const { checkInplaceExport, longPdf } = require('./pdf-export-check.cjs');
+const { checkPdfRange } = require('./pdf-range-check.cjs');
 
 function mockViewer(origin) {
   if (location.origin !== origin) return;
@@ -88,6 +89,14 @@ function mockViewer(origin) {
       provider: 'google', source: 'en', target: 'zh-CN', disabledSites: params.has('disabled-site') ? [location.hostname] : [],
       providers: { google: { configured: true, consent: true, hostPermission: true } }
     }
+  };
+  if (params.has('ahead')) {
+    const ahead = params.get('ahead');
+    settings.value.pdfLookAhead = ahead === 'all' ? ahead : Number(ahead);
+  }
+  window.setPdfLookAhead = value => {
+    settings.value.pdfLookAhead = value;
+    window.pdfSettingsChanged({ providerSettings: { newValue: settings.value } }, 'local');
   };
   chrome.runtime.sendMessage = async () => {
     if (params.has('hold-settings') && !window.pdfSettingsReleased) {
@@ -234,6 +243,7 @@ async function checkPdfBrowser({ page, evaluate, until, build }) {
       assert.deepEqual(await evaluate('window.panelOpened'), { tabId: 9 });
     }
     await checkInplaceExport({ navigate, evaluate, until, hasStatus });
+    await checkPdfRange({ navigate, evaluate, until, hasStatus });
     await navigate('/pdf.html?hold-pdf=1#9');
     await until(() => evaluate('window.pdfFetchStarted'));
     await evaluate('updatePdfTab({ status: "loading" }, { pendingUrl: location.origin + "/other" }); releasePdfFetch()');

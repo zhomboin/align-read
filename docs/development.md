@@ -56,7 +56,7 @@ python3 -m http.server '<本地测试端口>' --bind 127.0.0.1 --directory tests
 
 ## 提交与回归
 
-验证 PDF 原位阅读和下载时，在 WSL 扩展目录执行下列命令。测试使用合成 PDF 和模拟翻译服务，实际构建产物会生成译本并重新读取正文与附录。
+验证 PDF 原位阅读和下载时，在 WSL 扩展目录执行下列命令。测试使用合成 PDF 和模拟翻译服务，检查预译页数、全文翻译和下载。修改 PDF 默认范围时也运行 `npm run test:settings`，核对保存和恢复默认值。
 
 ```bash
 npm run check

@@ -44,9 +44,22 @@ export class PdfContinuousView {
   }
 
   applyTranslations(lookup: (page: number, id: string) => string | undefined) {
+    const restore = this.keepPagePosition();
     for (const [page, view] of this.visible) {
       for (const [id, update] of view.result?.rows ?? []) update(lookup(page, id));
     }
+    restore?.();
+  }
+
+  private keepPagePosition() {
+    const anchor = this.sheets[this.page - 1];
+    if (!anchor) return;
+    const top = anchor.offsetTop;
+    const scroll = this.viewport.scrollTop;
+    return () => {
+      const shift = anchor.offsetTop - top;
+      if (shift) this.viewport.scrollTop = scroll + shift;
+    };
   }
 
   dispose() {
@@ -119,6 +132,8 @@ export class PdfContinuousView {
     void this.render(number, view.controller.signal).then(result => {
       if (view.controller.signal.aborted) return;
       view.result = result;
+      // 前面页面的实际高度可能和占位高度不同，保持读者所在页的屏幕位置。
+      const restore = number < this.page ? this.keepPagePosition() : undefined;
       const translated = document.createElement('div');
       translated.className = 'pdf-translation';
       translated.append(result.content);
@@ -132,6 +147,7 @@ export class PdfContinuousView {
       sheet.append(translated);
       sheet.classList.add('pdf-sheet-ready');
       sheet.removeAttribute('aria-busy');
+      restore?.();
       this.updated(number);
       this.schedule();
     }, () => {
