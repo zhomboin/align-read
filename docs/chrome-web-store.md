@@ -16,25 +16,21 @@ AlignRead 已通过审核并上线。发布新版本时，在现有条目提交�
 4. [表格与表注](store/pdf-tables.png) 展示第 16 页的两张表格及居中表注。
 5. [选择翻译服务](store/translation-settings.png) 展示翻译服务设置。
 
-**简短描述**
+### 简短描述
 
 > 论文 PDF 与网页对照翻译，保留公式、图表和阅读结构。
 
-**详细描述**
+### 详细描述
 
-> AlignRead（对阅）让你并排阅读论文 PDF 和网页的原文与译文。在 Chrome 已打开的 PDF 旁启动对照阅读，也可以选择本地文件在独立阅读器中打开。
+> 用 AlignRead 阅读外语网页时，可以把原文和译文并排放在同一页。点击右栏的段落，左栏会定位到对应原文。也可以切换到原位模式直接阅读。只想看一个短语时，开启选词翻译，选中短语后点击「译」。
 >
-> PDF 阅读器按原文栏序组织正文，保留标题层级、页码位置以及可识别的图表。图注和表注可翻译。独立公式按原页整体显示，保留矩阵、分式、求和符号的上下限、上下标和公式编号。行内公式随段落显示，周围文字继续翻译，便于对照符号和推导。
+> 阅读论文时，可以在已打开的 PDF 旁展开侧栏，也可以选择本地文件。阅读器按原文顺序显示正文，并保留可识别的公式和图表。你可以从当前页开始，也可以下载整份译文。文件须带有文字层，大小上限为 100 MiB。扫描件请先做文字识别。
 >
-> 在新标签页可原位阅读和下载整份译文 PDF。滚动可连续跨页，也可以输入页码跳转。开始翻译后优先处理当前页。可设置向后预译页数（默认 2）或翻译整份 PDF。在线文件优先分段读取，分段失败会自动重试，仍无法分段时尝试完整读取。支持 100 MiB 以内带文字层的 PDF，扫描件需先做 OCR。
->
-> 双栏可联动滚动、调整宽度并点击译文定位原文。选择原位翻译可在原网页直接阅读译文，保留链接、样式和页面控件，随时恢复原文。两种模式可翻译整页可见文字或仅翻译正文，并随网站内容更新。开启选词翻译可查看并复制选中短语的译文。单独开启段落翻译，选中多段后按段落快捷键（默认 Ctrl），在每段原话下方阅读对应译文。
->
-> 首次使用时，请在设置中选择翻译服务，填入自己的服务凭据并授权。开始翻译后，浏览器会将待译文字发送给所选服务。PDF 文件和页面图像在本机处理。翻译额度和费用由服务提供方决定。
+> 使用前，请在设置中选择翻译服务，填入自己的凭据并授权。开始翻译后，浏览器会将待译文字发送给所选服务。PDF 文件和页面图像在本机处理。额度和费用由服务提供方决定。
 >
 > 截图与宣传图中的论文选自《KAN: Kolmogorov-Arnold Networks》，作者为 Ziming Liu、Yixuan Wang、Sachin Vaidya、Fabian Ruehle、James Halverson、Marin Soljačić、Thomas Y. Hou 和 Max Tegmark。原文为 arXiv:2404.19756v1，采用 CC BY 4.0。展示包含原页节选及校订的简体中文示例译文。
 >
-> [论文原文](https://arxiv.org/abs/2404.19756v1) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+> 论文原文 <https://arxiv.org/abs/2404.19756v1> · 许可条款 <https://creativecommons.org/licenses/by/4.0/>
 
 ## 隐私申报
 
@@ -92,6 +88,8 @@ AlignRead 已通过审核并上线。发布新版本时，在现有条目提交�
 提供凭据时，把专用测试凭据填入开发者后台的审核测试说明。 [审核测试说明](https://developer.chrome.com/docs/webstore/cws-dashboard-test-instructions)
 
 ## 上传与送审
+
+送审前核对公开文案，用实际操作说明扩展用途，删去无助于理解功能的罗列和重复。商店 FAQ 要求列举支持的网站或品牌时最多列五个，建议同一关键词少于五次，并结合上下文判断是否有必要重复。简短描述会自动显示在详情上方，详细描述直接从使用场景写起。 [Yellow Argon 拒审说明](https://developer.chrome.com/docs/webstore/troubleshooting?hl=zh-cn#keyword-stuffing) · [关键字政策 FAQ](https://developer.chrome.com/docs/webstore/program-policies/spam-faq#keyword-spam)
 
 仅修改商店文案时，在开发者后台打开 **AlignRead → Store listing**，选择 **Chinese (China)**，更新「详细描述」并保存。核对预览后点击 **Submit for Review** 重新送审。此类修改可沿用原送审包。 [商店元数据更新说明](https://developer.chrome.com/docs/webstore/update#update-the-listing-metadata)
 
