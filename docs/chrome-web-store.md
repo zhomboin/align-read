@@ -30,7 +30,7 @@ AlignRead 已通过审核并上线。发布新版本时，在现有条目提交�
 >
 > 双栏可联动滚动、调整宽度并点击译文定位原文。选择原位翻译可在原网页直接阅读译文，保留链接、样式和页面控件，随时恢复原文。两种模式可翻译整页可见文字或仅翻译正文，并随网站内容更新。开启选词翻译可查看并复制选中短语的译文。单独开启段落翻译，选中多段后按段落快捷键（默认 Ctrl），在每段原话下方阅读对应译文。
 >
-> 使用翻译功能前需配置自己的服务凭据。支持有道智云、Google Cloud Translation、OpenAI、Gemini、Grok、GLM、Kimi、豆包、腾讯混元、DeepSeek、MiniMax 和自定义 AI。PDF 文件与页面图像在本机处理，待译文字在用户开启翻译后发送给已授权的服务。服务额度与费用由服务方管理。
+> 首次使用时，请在设置中选择翻译服务，填入自己的服务凭据并授权。开始翻译后，浏览器会将待译文字发送给所选服务。PDF 文件和页面图像在本机处理。翻译额度和费用由服务提供方决定。
 >
 > 截图与宣传图中的论文选自《KAN: Kolmogorov-Arnold Networks》，作者为 Ziming Liu、Yixuan Wang、Sachin Vaidya、Fabian Ruehle、James Halverson、Marin Soljačić、Thomas Y. Hou 和 Max Tegmark。原文为 arXiv:2404.19756v1，采用 CC BY 4.0。展示包含原页节选及校订的简体中文示例译文。
 >
@@ -92,6 +92,10 @@ AlignRead 已通过审核并上线。发布新版本时，在现有条目提交�
 提供凭据时，把专用测试凭据填入开发者后台的审核测试说明。 [审核测试说明](https://developer.chrome.com/docs/webstore/cws-dashboard-test-instructions)
 
 ## 上传与送审
+
+仅修改商店文案时，在开发者后台打开 **AlignRead → Store listing**，选择 **Chinese (China)**，更新「详细描述」并保存。核对预览后点击 **Submit for Review** 重新送审。此类修改可沿用原送审包。 [商店元数据更新说明](https://developer.chrome.com/docs/webstore/update#update-the-listing-metadata)
+
+发布新版扩展时按以下步骤操作。
 
 1. 在 WSL 中完成 [发布验收](test-plan.md#运行)。在扩展目录运行下列命令，核对 ZIP 内的 `manifest.json` 和版本，并记录 SHA-256。
 
