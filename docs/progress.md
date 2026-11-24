@@ -4,7 +4,7 @@
 
 AlignRead 已通过 Chrome 网上应用店审核并上线。商店版本为 **0.1.6**，详情页显示上次更新为 **2026 年 11 月 18 日**。商店版支持双栏阅读和选词翻译。 [商店详情](https://chromewebstore.google.com/detail/alignread/eknjmgokcpffbikmkcnahgmbgcmdjihf?hl=zh-CN) · [版本记录](version.md)
 
-本次更新的简体中文详细描述已按审核反馈修订，待在开发者后台保存并重新送审。 [上架文案与送审步骤](chrome-web-store.md#商店详情)
+简体中文详细描述已按审核反馈更新，并已重新提交至 Chrome 网上应用店，现等待审核结果。 [送审文案](chrome-web-store.md#详细描述)
 
 ## 已实现功能
 
