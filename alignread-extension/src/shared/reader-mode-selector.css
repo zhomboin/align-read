@@ -1,6 +1,6 @@
 .mode-selector { min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; border: 0; }
 .mode-selector legend { padding: 0; margin: 0 0 2px; color: #52655b; font-size: 12px; line-height: 1.4; font-weight: 600; }
-.mode-track-control { display: inline-flex; align-items: center; gap: 6px; border-radius: 5px; }
+.mode-track-control { display: inline-grid; grid-template-columns: repeat(3, 1fr); column-gap: 4px; border-radius: 5px; }
 .mode-track-control .mode-name {
   appearance: none;
   min-block-size: 32px;
@@ -19,8 +19,10 @@
 .mode-track-control .mode-name:enabled:hover { text-decoration: underline; text-underline-offset: 3px; }
 .mode-track-control input[type="range"] {
   appearance: none;
-  width: 44px;
-  height: 32px;
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: calc(66.667% + 18px);
+  height: 24px;
   min-height: 0;
   margin: 0;
   padding: 0;
@@ -32,8 +34,8 @@
   touch-action: pan-y;
 }
 .mode-track-control input::-webkit-slider-runnable-track {
-  height: 24px;
-  padding: 3px;
+  height: 20px;
+  padding: 1px 3px;
   border-radius: 99px;
   background: #286149;
   box-shadow: inset 0 0 0 1px #1c503d;

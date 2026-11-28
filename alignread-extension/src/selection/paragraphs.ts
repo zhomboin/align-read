@@ -1,3 +1,4 @@
+import { paragraphDisplay } from '../shared/paragraph-display';
 import { send } from './session';
 import type { SelectionSession } from '../shared/selection-messages';
 import { splitText } from '../shared/split-text';
@@ -9,6 +10,7 @@ type Entry = {
   source: Paragraph;
   view: ReturnType<typeof createParagraphFeedback>;
   requestId?: string;
+  translated?: string;
 };
 
 export function startParagraphs(session: SelectionSession, signal: AbortSignal, currentPage: () => boolean) {
@@ -52,7 +54,8 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
       translated.push(result.value);
     }
     const separator = ['zh-CN', 'zh-TW', 'ja', 'th'].includes(session.target) ? '' : ' ';
-    entry.view.done(translated.join(separator));
+    entry.translated = translated.join(separator);
+    entry.view.done(entry.translated);
   }
 
   function enqueue(entry: Entry) {
@@ -71,9 +74,20 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     enqueue(entry);
   }
 
+  const display = paragraphDisplay();
+  display.takeSelection = (options, reuse) => {
+    const completed = new Map<string, string>();
+    for (const entry of entries.values()) {
+      if (reuse && session.source === options.source && session.target === options.target &&
+        entry.translated && current(entry)) completed.set(entry.source.text, entry.translated);
+      if (entries.has(entry.source.first)) remove(entry);
+    }
+    return completed;
+  };
+
   let shortcut = session.shortcut ?? DEFAULT_PARAGRAPH_SHORTCUT;
   const resetKeys = listenForShortcut(pressed => {
-    if (pressed !== shortcut || !currentPage()) return false;
+    if (display.fullPage || pressed !== shortcut || !currentPage()) return false;
     const sources = selectedParagraphs();
     const allShown = sources.length > 0 && sources.every(source => {
       const entry = entries.get(source.first);
@@ -105,6 +119,7 @@ export function startParagraphs(session: SelectionSession, signal: AbortSignal, 
     attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden', 'contenteditable', 'role', 'open', 'translate']
   });
   signal.addEventListener('abort', () => {
+    delete display.takeSelection;
     observer.disconnect();
     for (const entry of entries.values()) remove(entry);
   }, { once: true });

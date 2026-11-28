@@ -1,5 +1,7 @@
 import { browser } from 'wxt/browser';
 import { failure, success, type ErrorCode, type ReaderRequest, type Result, type Session } from '../../shared/reader-messages';
+import { createBilingualParagraphs } from './bilingual-paragraphs';
+import { paragraphDisplay } from '../../shared/paragraph-display';
 import { readReaderPage } from '../../shared/reader-page';
 import { canReplaceText, extractArticle, type Article } from '../extraction/document';
 import { displayComment } from '../extraction/code-comments';
@@ -27,9 +29,22 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   const layer = readingView.value;
 
   const lifecycle = new AbortController();
-  const toolbar = createReplacementToolbar(layer?.element);
-  const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar, () => {
-    if (viewportWidth() < MIN_WIDTH) return 'narrow';
+  const mode = session.mode ?? 'replace';
+  const bilingual = mode === 'bilingual' ? createBilingualParagraphs(session.target) : undefined;
+  if (bilingual) {
+    const display = paragraphDisplay();
+    display.fullPage = true;
+    const selected = display.takeSelection?.(session, session.cache);
+    if (selected?.size) {
+      const completed = new Map(inherited?.completed);
+      for (const [source, text] of selected) completed.set(source, text);
+      inherited = { ...inherited, completed };
+    }
+    lifecycle.signal.addEventListener('abort', () => { delete display.fullPage; }, { once: true });
+  }
+  const toolbar = createReplacementToolbar(mode, layer?.element);
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, renderToolbar, next => {
+    if (next === 'dual' && viewportWidth() < MIN_WIDTH) return 'narrow';
   });
   const identity = createArticleIdentity();
   const replacement = trackReplacementText();
@@ -61,6 +76,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     lifecycle.abort();
     extraction?.abort();
     clearTimeout(timer);
+    bilingual?.clear();
     replacement.restoreExcept();
     toolbar.close();
     void browser.runtime.sendMessage({ type: 'closed', sessionId: session.id } satisfies ReaderRequest)
@@ -99,6 +115,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     if (viewChanged) {
       for (const [node, text] of pageText) outgoing.set(node, { key: page.viewKey, text });
       pageText.clear();
+      bilingual?.clear();
       replacement.restoreExcept();
       translation.resetPage();
       article = undefined;
@@ -139,11 +156,16 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
     try {
       const viewError = readingLayerChange(layer);
       if (viewError) { close(viewError); return; }
-      const result = await extractArticle(session.range, controller.signal, undefined, (node) => {
-        if (replacement.siteControls(node)) return true;
-        const previous = outgoing.get(node);
-        return Boolean(previous && previous.key !== viewKey && previous.text === replacement.readText(node));
-      }, replacement, session.replaceComments, session.replaceComments, layer);
+      const result = await extractArticle(session.range, controller.signal, {
+        layer, bilingual: Boolean(bilingual), replacement: bilingual ? undefined : replacement,
+        translateComments: !bilingual && session.replaceComments,
+        skipText(node) {
+          if (replacement.siteControls(node)) return true;
+          const previous = outgoing.get(node);
+          return Boolean(previous && previous.key !== viewKey && previous.text === replacement.readText(node));
+        },
+      });
+      if (bilingual) result.blocks = result.blocks.filter(block => block.pieces.some(piece => piece.translate));
       flushChanges();
       if (closing || current !== revision || controller.signal.aborted) return;
 
@@ -154,7 +176,8 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
         for (const node of block.replacements?.keys() ?? []) retained.add(node);
       }
       replacement.restoreExcept(retained);
-      if (!retained.size && !started && !waitingForRoute) {
+      const hasText = bilingual ? result.blocks.length > 0 : retained.size > 0;
+      if (!hasText && !started && !waitingForRoute) {
         close('no-text');
         return;
       }
@@ -164,6 +187,7 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
       pageText = source;
       for (const node of pageText.keys()) outgoing.delete(node);
       identity.reconcile(result, article);
+      bilingual?.reconcile(result.blocks);
       article = result;
       articleRevision = current;
       appliedBlocks.clear();
@@ -186,6 +210,10 @@ export function startReplacementReader(session: Session, afterClose: (error?: Er
   function applyTranslations() {
     flushChanges();
     if (closing || articleRevision !== revision || !article) return;
+    if (bilingual) {
+      bilingual.render(article.blocks, translation);
+      return;
+    }
     for (const block of article.blocks) {
       if (!block.replacements?.size || appliedBlocks.has(block.id)) continue;
       if (translation.status(block.id) !== 'done') {

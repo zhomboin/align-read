@@ -18,6 +18,7 @@ const progressLabels = {
 };
 const modeLabels = {
   dual: { start: '开启双栏', switch: '切换为双栏', stop: '关闭双栏' },
+  bilingual: { start: '开启段落双语', switch: '切换为段落双语', stop: '关闭段落双语' },
   replace: { start: '开启原位翻译', switch: '切换为原位翻译', stop: '恢复原文' },
 };
 const providers = Object.keys(TRANSLATION_PROVIDERS).filter(isProviderId);
@@ -120,7 +121,7 @@ function Popup() {
 
   const active = Boolean(reader && (reader.status !== 'error' || reader.total > 0));
   const translationAction = !active ? modeLabels[mode].start : mode === readerMode ? '重新翻译' : modeLabels[mode].switch;
-  const retry = readerMode === 'replace' && (reader?.failed ?? 0) > 0;
+  const retry = readerMode !== 'dual' && (reader?.failed ?? 0) > 0;
   const access = page && selectedProviderAccess(page.settings);
   const configuredProviders = page ? providers.filter((id) => page.settings.providers[id].configured) : [];
   const setup = access && (!access.configured || !access.authorized);
@@ -194,12 +195,12 @@ function Popup() {
           <p className="selection-consent" id="selection-consent">点击「译」发送选中文字。</p>
         </div>
         <div>
-          <button type="button" disabled={page?.paragraphEnabled ? pending : blocked || Boolean(setup)}
+          <button type="button" disabled={page?.paragraphEnabled ? pending : blocked || Boolean(setup) || (active && readerMode === 'bilingual')}
             aria-pressed={Boolean(page?.paragraphEnabled)} aria-describedby="paragraph-consent"
             onClick={() => void toggleSelection('paragraph')}>
             {page?.paragraphEnabled ? '关闭段落翻译' : '开启段落翻译'}
           </button>
-          <p className="selection-consent" id="paragraph-consent">按快捷键发送选区涉及的整段正文。</p>
+          <p className="selection-consent" id="paragraph-consent">{active && readerMode === 'bilingual' ? '段落双语已开启，选区快捷键暂停。' : '按快捷键发送选区涉及的整段正文。'}</p>
           {page && <a className="shortcut-settings" href="options.html#shortcuts" target="_blank" rel="noopener noreferrer">
             段落快捷键 · {page.settings.paragraphShortcut}
           </a>}

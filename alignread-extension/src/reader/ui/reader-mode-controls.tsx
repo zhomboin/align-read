@@ -16,12 +16,17 @@ export function ReaderModeControl({ mode, modeSwitch }: { mode: ReaderMode; mode
   return <ReaderModeSelector className="reader-mode-field" mode={mode} onChange={modeSwitch.change} disabled={modeSwitch.pending} />;
 }
 
-export function ReplacementControls({ modeSwitch, close, state }: { modeSwitch: ReaderModeSwitch; close: () => void; state: ReaderState }) {
+export function ReplacementControls({ mode, modeSwitch, close, state }: {
+  mode: ReaderMode;
+  modeSwitch: ReaderModeSwitch;
+  close: () => void;
+  state: ReaderState;
+}) {
   return (
-    <section className="replacement-controls" aria-label="AlignRead 原位翻译">
+    <section className="replacement-controls" aria-label={mode === 'bilingual' ? 'AlignRead 段落双语' : 'AlignRead 原位翻译'}>
       <div className="controls" aria-busy={modeSwitch.pending}>
-        <ReaderModeControl mode="replace" modeSwitch={modeSwitch} />
-        <button type="button" disabled={modeSwitch.pending} onClick={close}>恢复原文</button>
+        <ReaderModeControl mode={mode} modeSwitch={modeSwitch} />
+        <button type="button" disabled={modeSwitch.pending} onClick={close}>{mode === 'bilingual' ? '关闭段落双语' : '恢复原文'}</button>
       </div>
       {modeSwitch.error && <p className="mode-switch-error" role="status">{errors[modeSwitch.error]}</p>}
       <ReaderProgress state={state} />

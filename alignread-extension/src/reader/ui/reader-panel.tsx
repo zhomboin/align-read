@@ -4,6 +4,7 @@ import type { Piece, ReadingNode } from '../extraction/document';
 import type { BlockStatus } from '../session/translation';
 import { ReaderModeControl, type ReaderModeSwitch } from './reader-mode-controls';
 import { ReaderProgress } from './reader-progress';
+import { readerSelection, selectedSentence } from '../alignment/sentences';
 import { MathView } from './math-view';
 import { displayComment } from '../extraction/code-comments';
 
@@ -13,7 +14,7 @@ type Props = {
   targets: Map<string, HTMLElement>;
   captureScroll: (element: HTMLElement | null) => void;
   show: (id: string, text: string) => string; status: (id: string) => BlockStatus;
-  onHover: (id: string | null) => void; locate: (id: string) => void;
+  onHover: (id: string | null) => void; locate: (id: string, pieceId?: string) => void;
   retry: (id?: string) => void; close: () => void;
   setRatio: (ratio: number, final: boolean) => void;
   toggleSync: () => void; toggleHover: () => void; togglePause: () => void;
@@ -22,6 +23,11 @@ type Props = {
 
 export function ReaderPanel(props: Props) {
   const { session, state, sync, hover, ratio, modeSwitch } = props;
+
+  function locateSelection(scroll: HTMLElement) {
+    const selected = selectedSentence(scroll, session.target);
+    if (selected) props.locate(selected.blockId, selected.pieceId);
+  }
 
   function beginDrag(event: ReactPointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
@@ -71,6 +77,8 @@ export function ReaderPanel(props: Props) {
         <ReaderProgress state={state} />
       </header>
       <div className="scroll" ref={props.captureScroll} tabIndex={0}
+        onPointerUp={event => { if (event.button === 0) locateSelection(event.currentTarget); }}
+        onKeyUp={event => { if (event.shiftKey) locateSelection(event.currentTarget); }}
         onPointerOver={(event) => props.onHover(blockId(event.target))}
         onPointerOut={(event) => {
           if (blockId(event.target) !== blockId(event.relatedTarget)) props.onHover(blockId(event.relatedTarget));
@@ -78,14 +86,14 @@ export function ReaderPanel(props: Props) {
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey ||
               event.metaKey || event.shiftKey || !(event.target instanceof Element) ||
-              event.target.closest('a,button') || window.getSelection()?.isCollapsed === false) return;
+            event.target.closest('a,button') || readerSelection(event.currentTarget)?.isCollapsed === false) return;
           const id = blockId(event.target);
           if (id) props.locate(id);
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.defaultPrevented || event.repeat ||
               event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
-              !(event.target instanceof HTMLElement) || window.getSelection()?.isCollapsed === false) return;
+            !(event.target instanceof HTMLElement) || readerSelection(event.currentTarget)?.isCollapsed === false) return;
           const id = event.target.dataset.readerBlock;
           if (id) {
             event.preventDefault();
@@ -162,17 +170,18 @@ function nodeView(node: ReadingNode, props: Props, key: number): ReactNode {
       else props.targets.delete(node.id);
     },
   };
-  const children = node.pieces.map((piece) => pieceView(piece, props.show(piece.id, piece.text)));
+  const children = node.pieces.map(piece =>
+    pieceView(piece, props.show(piece.id, piece.text), Boolean(piece.sentence && state === 'done')));
   if (node.tag !== 'pre' && state === 'failed') children.push(
     <button key="retry" type="button" className="retry" onClick={() => props.retry(node.id)}>重试</button>);
   return createElement(node.tag === 'summary' ? 'div' : node.tag, attributes, children);
 }
 
-function pieceView(piece: Piece, text: string): ReactNode {
+function pieceView(piece: Piece, text: string, precise: boolean): ReactNode {
   if (piece.formula) return <MathView key={piece.id} formula={piece.formula} />;
   if (piece.lineBreak) return <br key={piece.id} />;
   let value: ReactNode = piece.comment ? displayComment(piece.text, text) : text;
   for (const mark of piece.marks) value = createElement(mark, null, value);
   if (piece.href) return <a key={piece.id} href={piece.href} target="_blank" rel="noopener noreferrer">{value}</a>;
-  return <span key={piece.id}>{value}</span>;
+  return <span key={piece.id} data-reader-sentence={precise ? piece.id : undefined}>{value}</span>;
 }

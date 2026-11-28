@@ -64,7 +64,7 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
   assert.equal(session[`reader:${tabId}`].session.mode, 'dual');
   assert.equal(tab.selectionId, selectionId);
-  await evaluate(`document.querySelector('.mode-field .mode-name:last-child').click()`);
+  await evaluate(`Array.from(document.querySelectorAll('.mode-field .mode-name')).find(button => button.textContent === '原位翻译').click()`);
   await click('切换为原位翻译');
   await shown('恢复原文');
   assert.equal(tab.lastReaderCommand, 'reader:switch-mode');
@@ -75,6 +75,12 @@ async function checkReplacementPopup({page, evaluate, until, request, dispatch, 
   await shown('开启原位翻译');
   assert.equal(session[`reader:${tabId}`], undefined);
   assert.equal(tab.selectionId, selectionId);
+  await evaluate(`Array.from(document.querySelectorAll('.mode-field .mode-name')).find(button => button.textContent === '段落双语').click()`);
+  await click('开启段落双语');
+  await shown('关闭段落双语');
+  assert.equal(session[`reader:${tabId}`].session.mode, 'bilingual');
+  await click('关闭段落双语');
+  await shown('开启段落双语');
   await checkModeSwitchWorker({dispatch, request, session, tabId, tab, calls, until});
   assert.equal(tab.selectionId, selectionId);
   await request({type: 'reset'});
@@ -281,6 +287,7 @@ async function checkReplacementBrowser({page, evaluate, until, build}) {
   await require('./mode-reuse-check.cjs').checkModeReuse({evaluate, until});
   await require('./site-reading-view-check.cjs').checkSiteReadingReplacement({ evaluate, until });
   await checkProgressBrowser({ page, evaluate, until });
+  await require('./bilingual-reading-check.cjs').checkBilingualReading({ page, evaluate, until, build });
   console.log('Built reader switched modes on-page, preserved nodes and layout, restored originals, and isolated late responses.');
 }
 

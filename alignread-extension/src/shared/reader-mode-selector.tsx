@@ -12,7 +12,7 @@ type Props = {
 export function ReaderModeSelector({ className, mode, disabled, onChange }: Props) {
   const labelId = useId();
   const slider = useRef<HTMLInputElement>(null);
-  const index = mode === 'replace' ? 1 : 0;
+  const index = READER_MODE_OPTIONS.findIndex(option => option.value === mode);
 
   useLayoutEffect(() => {
     if (slider.current) slider.current.valueAsNumber = index;
@@ -22,7 +22,7 @@ export function ReaderModeSelector({ className, mode, disabled, onChange }: Prop
   useLayoutEffect(() => {
     const input = slider.current!;
     function commit() {
-      const next = READER_MODE_OPTIONS[input.valueAsNumber === 1 ? 1 : 0].value;
+      const next = READER_MODE_OPTIONS[input.valueAsNumber]!.value;
       input.valueAsNumber = index;
       if (next !== mode) onChange(next);
     }
@@ -31,7 +31,7 @@ export function ReaderModeSelector({ className, mode, disabled, onChange }: Prop
   }, [index, mode, onChange]);
 
   function label(option: typeof READER_MODE_OPTIONS[number]) {
-    return <button type="button" className="mode-name" tabIndex={-1} aria-pressed={mode === option.value}
+    return <button key={option.value} type="button" className="mode-name" tabIndex={-1} aria-pressed={mode === option.value}
       onClick={() => {
         slider.current?.focus({ preventScroll: true });
         if (mode !== option.value) onChange(option.value);
@@ -41,10 +41,9 @@ export function ReaderModeSelector({ className, mode, disabled, onChange }: Prop
   return <fieldset className={`mode-selector ${className}`} dir="ltr" disabled={disabled}>
     <legend id={labelId}>翻译模式</legend>
     <div className="mode-track-control">
-      {label(READER_MODE_OPTIONS[0])}
-      <input ref={slider} type="range" min="0" max="1" step="1" defaultValue={index}
-        aria-labelledby={labelId} aria-valuetext={READER_MODE_OPTIONS[index].label} />
-      {label(READER_MODE_OPTIONS[1])}
+      {READER_MODE_OPTIONS.map(label)}
+      <input ref={slider} type="range" min="0" max={READER_MODE_OPTIONS.length - 1} step="1" defaultValue={index}
+        aria-labelledby={labelId} aria-valuetext={READER_MODE_OPTIONS[index]!.label} />
     </div>
   </fieldset>;
 }

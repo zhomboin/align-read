@@ -5,6 +5,7 @@ import {
   clampRatio, errors, failure, success, type ErrorCode, type ReaderRequest, type ReaderState, type Result, type Session,
 } from '../../shared/reader-messages';
 import { readReaderPage } from '../../shared/reader-page';
+import { prepareSentenceRanges } from '../alignment/sentences';
 import { connectAlignment } from '../alignment/alignment';
 import { extractArticle, type Article, type Mark } from '../extraction/document';
 import { createSplit, MIN_WIDTH, viewportWidth } from '../layout/split';
@@ -48,9 +49,9 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
   let sync = session.syncScroll;
   let hover = session.highlight;
   let article: Article | undefined;
-  const modeSwitch = createModeSwitch(session, lifecycle.signal, render, () => {
-    if (article && !article.blocks.some(({ pieces }) =>
-      pieces.some((piece) => piece.comment ? session.replaceComments : piece.translate))) return 'no-text';
+  const modeSwitch = createModeSwitch(session, lifecycle.signal, render, (mode) => {
+    if (article && !article.blocks.some(({ pieces }) => pieces.some(piece =>
+      piece.comment ? mode === 'replace' && session.replaceComments : piece.translate))) return 'no-text';
   });
   const identity = createArticleIdentity();
   const translation = createTranslation(session, lifecycle.signal, render, inherited);
@@ -129,7 +130,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       show={translation.show}
       status={translation.status}
       onHover={(id) => alignment?.paint(id)}
-      locate={(id) => alignment?.locate('source', id)}
+      locate={(id, pieceId) => alignment?.locate('source', id, pieceId)}
       retry={translation.retry}
       close={() => close()} setRatio={setRatio}
       modeSwitch={modeSwitch()}
@@ -252,10 +253,14 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
         layoutBlockedAt = undefined;
         split.refreshSidebar();
       }
-      const result = await extractArticle(session.range, controller.signal, split.sidebar, (node) => {
-        const previous = outgoing.get(node);
-        return Boolean(previous && previous.key !== key && previous.text === node.data);
-      }, undefined, session.dualComments, session.dualComments || session.replaceComments, layer);
+      const result = await extractArticle(session.range, controller.signal, {
+        sidebar: split.sidebar, layer, translateComments: session.dualComments,
+        detectComments: session.dualComments || session.replaceComments,
+        skipText(node) {
+          const previous = outgoing.get(node);
+          return Boolean(previous && previous.key !== key && previous.text === node.data);
+        },
+      });
       flushChanges();
       if (controller.signal.aborted || lifecycle.signal.aborted || current !== revision) return;
       if (!validSources(result)) { sourceChanged(); return; }
@@ -284,6 +289,7 @@ export function startReader(session: Session, afterClose: (error?: ErrorCode) =>
       pageText = source;
       for (const node of pageText.keys()) outgoing.delete(node);
       disconnectAlignment();
+      prepareSentenceRanges(result.blocks, session.source);
       identity.reconcile(result, article);
       article = result;
       translation.replace(result.blocks, href);

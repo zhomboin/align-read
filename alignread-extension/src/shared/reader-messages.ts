@@ -15,7 +15,7 @@ export const DEFAULT_PDF_LOOK_AHEAD = 2;
 export function isPdfLookAhead(value: unknown): value is PdfLookAhead {
   return value === 'all' || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
 }
-export type ReaderMode = 'dual' | 'replace';
+export type ReaderMode = 'dual' | 'replace' | 'bilingual';
 export type ReadingOptions = { source: SourceLanguage; target: Language; range: ReadingRange };
 export type Preferences = ReadingOptions & {
   dualComments: boolean;
@@ -169,7 +169,7 @@ export function isLanguage(value: unknown): value is Language {
   return typeof value === 'string' && Object.hasOwn(LANGUAGES, value);
 }
 export function isReaderMode(value: unknown): value is ReaderMode {
-  return value === 'dual' || value === 'replace';
+  return value === 'dual' || value === 'replace' || value === 'bilingual';
 }
 export function isReadingOptions(value: unknown): value is ReadingOptions {
   return isRecord(value) && (value.source === 'auto' || isLanguage(value.source)) &&
