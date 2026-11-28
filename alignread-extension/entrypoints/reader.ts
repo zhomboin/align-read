@@ -25,7 +25,7 @@ export default defineUnlistedScript(() => {
     else if (active?.id !== previousSessionId) return failure('stale');
     const command = generation;
     const mode = session.mode ?? 'dual';
-    const start = mode === 'replace'
+    const start = mode !== 'dual'
       ? (await import('../src/reader/session/replacement-reader')).startReplacementReader
       : (await import('../src/reader/session/reader')).startReader;
     if (command !== generation) return failure('stale');

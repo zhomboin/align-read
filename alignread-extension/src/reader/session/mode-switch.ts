@@ -3,14 +3,14 @@ import { failure, type ErrorCode, type ReaderMode, type ReaderRequest, type Read
 import type { ReaderModeSwitch } from '../ui/reader-mode-controls';
 
 export function createModeSwitch(
-  session: Session, signal: AbortSignal, update: () => void, checkTarget: () => ErrorCode | undefined,
+  session: Session, signal: AbortSignal, update: () => void, checkTarget: (mode: ReaderMode) => ErrorCode | undefined,
 ) {
   let pending = false;
   let error: ErrorCode | undefined;
 
   async function change(mode: ReaderMode) {
     if (pending || signal.aborted || mode === (session.mode ?? 'dual')) return;
-    error = checkTarget();
+    error = checkTarget(mode);
     if (error) {
       update();
       return;

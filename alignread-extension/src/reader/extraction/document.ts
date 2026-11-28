@@ -12,7 +12,7 @@ const inlineTags = {
 export type Mark = (typeof inlineTags)[keyof typeof inlineTags];
 export type Piece = {
   id: string; text: string; translate: boolean; marks: Mark[]; href?: string; lineBreak?: true;
-  formula?: Formula; comment?: true;
+  formula?: Formula; comment?: true; sentence?: Range;
 };
 export type ReplacementFragment = string | Piece;
 export type Block = {
@@ -83,15 +83,22 @@ export function canReplaceText(node: Text, isComment = false, layer?: ReadingLay
     replacementAllowed(parent, layer) && visibleContext(parent, !isComment, layer);
 }
 
-export async function extractArticle(
-  range: ReadingRange, signal: AbortSignal, sidebar?: SidebarLayout, skipText?: (node: Text) => boolean,
-  replacement?: { readText(node: Text): string },
-  translateComments = false,
-  detectComments = translateComments,
-  layer?: ReadingLayer,
-): Promise<Article> {
+type ExtractionOptions = {
+  sidebar?: SidebarLayout;
+  skipText?: (node: Text) => boolean;
+  replacement?: { readText(node: Text): string };
+  translateComments?: boolean;
+  detectComments?: boolean;
+  layer?: ReadingLayer;
+  bilingual?: boolean;
+};
+
+export async function extractArticle(range: ReadingRange, signal: AbortSignal, options: ExtractionOptions): Promise<Article> {
+  const { sidebar, skipText, replacement, translateComments = false, detectComments = translateComments, layer, bilingual } = options;
   const mainOnly = range === 'main';
-  const scope = layer?.article ?? pageReadingArticle() ?? (mainOnly ? mainContent(replacement ? replacementAllowed : undefined) : undefined) ?? document.body;
+  const inPage = Boolean(replacement || bilingual);
+  const scope = layer?.article ?? pageReadingArticle() ??
+    (mainOnly ? mainContent(inPage ? replacementAllowed : undefined) : undefined) ?? document.body;
   const blocks: Block[] = [];
   let visited = 0;
 
@@ -101,7 +108,7 @@ export async function extractArticle(
   }
 
   function readableStyle(element: HTMLElement) {
-    if (replacement ? !replacementAllowed(element, layer) : element.matches(excluded) || outsideReadingDialog(element, layer)) return undefined;
+    if (inPage ? !replacementAllowed(element, layer) : element.matches(excluded) || outsideReadingDialog(element, layer)) return undefined;
     if (mainOnly && (element === sidebar?.sidebarBranch ||
         element.matches(mainExcluded) && !element.matches('[role=tablist]'))) return undefined;
     const style = getComputedStyle(element);
@@ -408,7 +415,7 @@ export async function extractArticle(
   }
 
   let nodes: ReadingNode[] = [];
-  if (visibleContext(scope, Boolean(replacement) && !translateComments, layer) && (!replacement || replacementAllowed(scope, layer))) {
+  if (visibleContext(scope, Boolean(replacement) && !translateComments, layer) && (!inPage || replacementAllowed(scope, layer))) {
     if (scope.matches(codeTextSelector) || isCodeBlock(scope, getComputedStyle(scope))) {
       const entry = await copyCode(scope);
       if (entry) nodes.push(entry);

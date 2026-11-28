@@ -279,7 +279,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   }
 
   function retry(blockId?: string) {
-    if (error) blockId = undefined;
+    if (error && session.mode !== 'bilingual') blockId = undefined;
     for (const entry of work.values()) {
       if (blockId && entry.block.id !== blockId) continue;
       for (const part of entry.parts) part.error = undefined;
@@ -300,6 +300,7 @@ export function createTranslation(session: Session, signal: AbortSignal, update:
   }, { once: true });
 
   return {
+    blockError(id: string) { return work.get(id)?.parts.find(part => part.error)?.error; },
     state, status, show, run, retry, hold, replace, refreshAddress, resetPage, translationsForMode,
     pause() { paused = true; update(); },
     resume() { if (error) retry(); else { paused = false; update(); run(); } },

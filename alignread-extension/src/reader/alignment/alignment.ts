@@ -1,3 +1,4 @@
+import { readerSelection } from './sentences';
 import type { Block } from '../extraction/document';
 
 type Side = 'source' | 'target';
@@ -97,8 +98,8 @@ export function connectAlignment({
     return edge + 12;
   }
 
-  function scrollTo(side: Side, id: string, adjustment = 0) {
-    const bounds = rect(side, id);
+  function scrollTo(side: Side, id: string, adjustment = 0, range?: Range) {
+    const bounds = range?.getBoundingClientRect() ?? rect(side, id);
     if (!bounds) return;
     const block = sourceById.get(id);
     const root = side === 'target' ? targetRoot : block && sourceRoot.contains(block.source) ? sourceRoot : sourceViewport;
@@ -147,23 +148,29 @@ export function connectAlignment({
 
   function selecting() {
     const selection = document.getSelection();
-    return selection?.isCollapsed === false;
+    return selection?.isCollapsed === false || readerSelection(targetRoot)?.isCollapsed === false;
   }
 
-  function paint(id: string | null, force = false) {
+  function paint(id: string | null, force = false, sentence?: Range) {
     clearTimeout(highlightTimer);
     registry?.delete('alignread-paragraph');
-    const ranges = id ? sourceById.get(id)?.ranges : undefined;
+    const ranges = sentence ? [sentence] : id ? sourceById.get(id)?.ranges : undefined;
     if (id && ranges && (force || highlightEnabled()) && ranges.every((range) => range.startContainer.isConnected)) {
       registry?.set('alignread-paragraph', new Highlight(...ranges));
       showHighlight(id);
     } else showHighlight(null);
   }
 
-  function locate(side: Side, id: string) {
-    paint(id, true);
+  function locate(side: Side, id: string, pieceId?: string) {
+    const block = sourceById.get(id);
+    const piece = pieceId && block?.pieces.find(item => item.id === pieceId);
+    const range = piece && piece.sentence;
+    const original = range && block?.snapshots.get(range.startContainer as Text);
+    const sentence = range && range.startContainer.isConnected && range.startContainer.textContent === original
+      ? range : undefined;
+    paint(id, true, sentence);
     if (side === 'target') revealHorizontalTarget(id);
-    if (primaryIds.has(id)) scrollTo(side, id);
+    if (primaryIds.has(id)) scrollTo(side, id, 0, sentence);
     else {
       const element = side === 'source' ? sourceById.get(id)?.source : targets.get(id);
       suppression = { side, expires: performance.now() + 180 };

@@ -7,7 +7,7 @@ async function moveModeSlider(page, evaluate, input, mode, drag = false) {
     const rect = slider.getBoundingClientRect();
     ({left: rect.left + 5, right: rect.right - 5, y: rect.top + rect.height / 2});
   }`);
-  const x = mode === 'dual' ? bounds.left : bounds.right;
+  const x = mode === 'dual' ? bounds.left : mode === 'replace' ? (bounds.left + bounds.right) / 2 : bounds.right;
   const start = drag ? bounds.left + bounds.right - x : x;
   await page('Input.dispatchMouseEvent', { type: 'mousePressed', x: start, y: bounds.y, button: 'left', buttons: 1, clickCount: 1 });
   if (drag) {
